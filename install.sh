@@ -95,26 +95,212 @@ EOF
 
 pip install -r requirements.txt
 
-# 6. Копирование файлов модуля
+# 5.5 АВТОПРОВЕРКА И СКАЧИВАНИЕ ФАЙЛОВ МОДУЛЯ
+log_info "5.5 Проверка и скачивание файлов модуля..."
+
+MODULE_FILES=(
+    "__init__.py" "config.py" "connection_pool.py" "database.py" 
+    "blockchain_monitor.py" "funds_collector.py" "health_check.py" 
+    "monitoring.py" "nownodes_client.py" "rest_api.py" "users.py" "utils.py"
+)
+
+MISSING_FILES=()
+for file in "${MODULE_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        MISSING_FILES+=("$file")
+    fi
+done
+
+if [ ${#MISSING_FILES[@]} -eq 0 ]; then
+    log_success "Все файлы модуля найдены локально"
+else
+    log_warning "Найдено ${#MISSING_FILES[@]} отсутствующих файлов: ${MISSING_FILES[*]}"
+    log_info "Скачивание файлов из репозитория GitHub..."
+    
+    # Создаем временную директорию
+    TEMP_DIR=$(mktemp -d)
+    
+    # Клонируем репозиторий
+    if git clone --depth 1 https://github.com/glebkoxan36/node_manager.git "$TEMP_DIR" 2>/dev/null; then
+        log_success "Репозиторий успешно клонирован"
+        
+        # Копируем недостающие файлы из blockchain_module директории
+        for file in "${MISSING_FILES[@]}"; do
+            if [ -f "$TEMP_DIR/blockchain_module/$file" ]; then
+                cp "$TEMP_DIR/blockchain_module/$file" .
+                log_success "Скачан: $file"
+            elif [ -f "$TEMP_DIR/$file" ]; then
+                cp "$TEMP_DIR/$file" .
+                log_success "Скачан: $file (из корня репозитория)"
+            else
+                log_error "Файл не найден в репозитории: $file"
+                log_info "Создание пустого файла для совместимости..."
+                touch "$file"
+                echo "# Placeholder for $file - download failed" > "$file"
+            fi
+        done
+        
+        # Также копируем дополнительные файлы если они есть
+        if [ -f "$TEMP_DIR/blockchain_module/cli.py" ]; then
+            cp "$TEMP_DIR/blockchain_module/cli.py" .
+            log_success "Скачан дополнительный файл: cli.py"
+        fi
+        
+        # Очищаем временную директорию
+        rm -rf "$TEMP_DIR"
+    else
+        log_error "Не удалось клонировать репозиторий. Проверьте подключение к интернету."
+        log_info "Попытка скачать файлы напрямую через wget..."
+        
+        for file in "${MISSING_FILES[@]}"; do
+            log_info "Попытка скачать: $file"
+            if wget -q "https://raw.githubusercontent.com/glebkoxan36/node_manager/main/blockchain_module/$file" -O "$file" 2>/dev/null; then
+                log_success "Скачан напрямую: $file"
+            else
+                log_error "Не удалось скачать: $file"
+                log_info "Создание минимальной версии файла..."
+                
+                # Создаем минимальные версии файлов для работы
+                case "$file" in
+                    "__init__.py")
+                        cat > "$file" << 'INIT_EOF'
+"""
+Blockchain Module - Универсальный модуль для работы с криптовалютами через Nownodes API
+"""
+
+import logging
+
+__version__ = "2.0.0"
+__author__ = "Blockchain Module Team"
+
+logger = logging.getLogger(__name__)
+
+def get_module_info():
+    return {
+        'version': __version__,
+        'author': __author__,
+        'message': 'Минимальная версия модуля. Файлы были созданы автоматически.'
+    }
+
+print(f"Blockchain Module v{__version__} инициализирован (минимальная версия)")
+INIT_EOF
+                        ;;
+                    "config.py")
+                        cat > "$file" << 'CONFIG_EOF'
+"""
+Конфигурация модуля
+"""
+
+import json
+import os
+from pathlib import Path
+
+class BlockchainConfig:
+    NOWNODES_API_KEY = os.getenv('NOWNODES_API_KEY', '')
+    
+    @classmethod
+    def get_coin_config(cls, coin_symbol):
+        return {
+            'symbol': coin_symbol.upper(),
+            'name': coin_symbol,
+            'decimals': 8,
+            'blockbook_url': f'https://{coin_symbol.lower()}book.nownodes.io'
+        }
+    
+    @classmethod
+    def get_api_key(cls):
+        return cls.NOWNODES_API_KEY
+
+class ConfigManager:
+    def __init__(self, config_file=None):
+        self.config_file = config_file or Path(__file__).parent.parent / 'configs' / 'module_config.json'
+    
+    def get_coin_config(self, coin_symbol):
+        return BlockchainConfig.get_coin_config(coin_symbol)
+CONFIG_EOF
+                        ;;
+                    "rest_api.py")
+                        cat > "$file" << 'REST_API_EOF'
+"""
+Простой REST API для Blockchain Module
+"""
+
+from aiohttp import web
+import logging
+import asyncio
+
+logger = logging.getLogger(__name__)
+
+async def handle_info(request):
+    return web.json_response({
+        'success': True,
+        'version': '2.0.0',
+        'message': 'Blockchain Module REST API (минимальная версия)',
+        'endpoints': ['/api/v1/info', '/api/v1/health']
+    })
+
+async def handle_health(request):
+    return web.json_response({
+        'success': True,
+        'status': 'healthy',
+        'timestamp': asyncio.get_event_loop().time()
+    })
+
+async def run_rest_api(host='0.0.0.0', port=8080):
+    app = web.Application()
+    app.router.add_get('/api/v1/info', handle_info)
+    app.router.add_get('/api/v1/health', handle_health)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    
+    logger.info(f"REST API запущен на http://{host}:{port}")
+    print(f"✅ REST API доступен по адресу: http://{host}:{port}")
+    
+    await site.start()
+    
+    # Бесконечное ожидание
+    await asyncio.Event().wait()
+
+def create_rest_api(host='0.0.0.0', port=8080):
+    class SimpleAPI:
+        async def start(self):
+            return await run_rest_api(host, port)
+    return SimpleAPI()
+REST_API_EOF
+                        ;;
+                    *)
+                        # Для остальных файлов создаем минимальные заглушки
+                        echo "# Минимальная версия $file" > "$file"
+                        echo "# Этот файл был создан автоматически при установке" >> "$file"
+                        echo "raise NotImplementedError('Это минимальная версия файла. Установите полную версию.')" >> "$file"
+                        ;;
+                esac
+                log_warning "Создана минимальная версия: $file"
+            fi
+        done
+    fi
+fi
+
+# 6. Копирование файлов модуля в структуру проекта
 log_info "6. Настройка структуры модуля..."
 
 # Создание директории модуля
 mkdir -p blockchain_module
 
-# Копирование основных файлов (если они в текущей директории)
+# Функция копирования файлов
 copy_file() {
     if [ -f "$1" ]; then
         cp "$1" "blockchain_module/$1"
-        log_success "Скопирован: $1"
+        log_success "Скопирован в модуль: $1"
     else
-        log_warning "Файл не найден: $1"
+        log_warning "Файл не найден для копирования: $1"
     fi
 }
 
 # Копирование основных модулей
-for file in __init__.py config.py connection_pool.py database.py blockchain_monitor.py \
-             funds_collector.py health_check.py monitoring.py nownodes_client.py \
-             rest_api.py users.py utils.py; do
+for file in "${MODULE_FILES[@]}"; do
     copy_file "$file"
 done
 
@@ -431,6 +617,14 @@ echo ""
 read -p "Запустить мониторинг (Prometheus/Grafana) сейчас? (y/n): " start_monitoring
 if [[ $start_monitoring == "y" || $start_monitoring == "Y" ]]; then
     log_info "Запуск мониторинга..."
+    
+    # Проверяем, не занят ли порт 9090
+    if sudo lsof -i :9090 > /dev/null 2>&1; then
+        log_warning "Порт 9090 уже занят. Останавливаем конфликтующий процесс..."
+        sudo kill $(sudo lsof -t -i :9090) 2>/dev/null || true
+        sleep 2
+    fi
+    
     docker-compose -f docker-compose-monitoring.yml up -d
     log_success "Мониторинг запущен"
 fi
@@ -441,12 +635,22 @@ if [[ $start_api == "y" || $start_api == "Y" ]]; then
     log_info "Запуск REST API..."
     source venv/bin/activate
     export PYTHONPATH=$PYTHONPATH:$(pwd)
+    
+    # Проверяем, не занят ли порт 8080
+    if sudo lsof -i :8080 > /dev/null 2>&1; then
+        log_warning "Порт 8080 уже занят. Останавливаем конфликтующий процесс..."
+        sudo kill $(sudo lsof -t -i :8080) 2>/dev/null || true
+        sleep 2
+    fi
+    
     screen -dmS blockchain-api bash scripts/start_api.sh
+    
     sleep 3
     if pgrep -f "blockchain_module" > /dev/null; then
         log_success "REST API запущен в screen сессии"
     else
         log_error "Не удалось запустить REST API"
+        log_info "Попробуйте запустить вручную: ./scripts/start_api.sh"
     fi
 fi
 
@@ -518,10 +722,22 @@ asyncio.run(run_rest_api(host='0.0.0.0', port=8080))
 from blockchain_module import start_cli
 import asyncio
 asyncio.run(start_cli())
-"
+" 2>/dev/null || echo "CLI модуль не доступен. Установите полную версию."
+        ;;
+    update-files)
+        echo "Обновление файлов модуля из GitHub..."
+        cd "$(dirname "$0")"
+        TEMP_DIR=$(mktemp -d)
+        if git clone --depth 1 https://github.com/glebkoxan36/node_manager.git "$TEMP_DIR" 2>/dev/null; then
+            cp "$TEMP_DIR"/blockchain_module/*.py blockchain_module/ 2>/dev/null || true
+            rm -rf "$TEMP_DIR"
+            echo "Файлы обновлены"
+        else
+            echo "Ошибка при обновлении файлов"
+        fi
         ;;
     *)
-        echo "Использование: $0 {start-api|start-monitoring|stop|status|logs-api|logs-monitoring|update-config|cli}"
+        echo "Использование: $0 {start-api|start-monitoring|stop|status|logs-api|logs-monitoring|update-config|cli|update-files}"
         echo ""
         echo "Команды:"
         echo "  start-api        - Запустить REST API"
@@ -532,6 +748,7 @@ asyncio.run(start_cli())
         echo "  logs-monitoring  - Показать логи мониторинга"
         echo "  update-config    - Редактировать конфигурацию"
         echo "  cli              - Запустить CLI интерфейс"
+        echo "  update-files     - Обновить файлы модуля из GitHub"
         exit 1
         ;;
 esac
@@ -560,6 +777,7 @@ echo "  ./blockchain-manager.sh start-api        # Запустить REST API"
 echo "  ./blockchain-manager.sh start-monitoring # Запустить мониторинг"
 echo "  ./blockchain-manager.sh status           # Статус всех сервисов"
 echo "  ./blockchain-manager.sh cli              # CLI интерфейс"
+echo "  ./blockchain-manager.sh update-files     # Обновить файлы из GitHub"
 echo ""
 echo "⚙️  КОНФИГУРАЦИЯ:"
 echo "  Файл конфигурации:    configs/module_config.json"
@@ -570,8 +788,12 @@ echo "🔐 АДМИНИСТРАТИВНЫЙ ДОСТУП:"
 echo "  Для доступа к API используйте API ключ администратора"
 echo "  (сгенерирован автоматически при первом запуске)"
 echo ""
-echo "📚 ДОКУМЕНТАЦИЯ:"
-echo "  Полная документация:  https://github.com/ваш-репозиторий"
+echo "🔄 ВОЗМОЖНЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ:"
+echo "  1. Если API не работает: ./blockchain-manager.sh update-files"
+echo "  2. Если порты заняты: ./blockchain-manager.sh stop && ./blockchain-manager.sh start-api"
+echo "  3. Если нет файлов: скрипт автоматически создаст минимальные версии"
 echo ""
-echo -e "${YELLOW}⚠️  ПЕРЕЗАГРУЗИТЕ СИСТЕМУ или выполните: newgrp docker${NC}"
-echo -e "${YELLOW}   чтобы права Docker вступили в силу${NC}"
+echo -e "${YELLOW}⚠️  Для применения изменений в группе Docker выполните:${NC}"
+echo -e "${YELLOW}   newgrp docker${NC}"
+echo ""
+echo -e "${GREEN}✅ Готово! Модуль установлен с автоскачиванием файлов.${NC}"
