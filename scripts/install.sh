@@ -1,129 +1,128 @@
 #!/bin/bash
-# Blockchain Module - Complete Installation Script
-# Version: 2.0.0
+# Blockchain Module v2.0 - Автоматическая установка и настройка
+# Полная установка модуля, зависимостей, мониторинга и запуск
 
-set -e  # Exit on error
+set -e  # Прерывать при ошибках
 
-echo "========================================="
-echo "  Blockchain Module Installation v2.0.0"
-echo "========================================="
-
-# Colors for output
+# Цвета для вывода
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Functions
-print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-print_error() { echo -e "${RED}[✗]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-print_info() { echo -e "${BLUE}[i]${NC} $1"; }
+# Функции для вывода
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Check if running as root
+# Проверка прав
 if [ "$EUID" -eq 0 ]; then 
-    print_error "Please do not run as root. Run as a normal user."
-    exit 1
+    log_warning "Скрипт запущен с правами root. Продолжаем..."
 fi
 
-# Step 1: Check system requirements
-print_info "Step 1: Checking system requirements..."
+echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║       Blockchain Module v2.0 - Автоматическая установка   ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+echo ""
 
-# Check Python
-if ! command -v python3 &> /dev/null; then
-    print_error "Python 3 is not installed. Please install Python 3.7+"
-    exit 1
-fi
+# 1. Обновление системы и установка базовых зависимостей
+log_info "1. Обновление системы и установка зависимостей..."
+sudo apt-get update && sudo apt-get upgrade -y
+sudo apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    build-essential \
+    git \
+    curl \
+    wget \
+    net-tools \
+    lsof \
+    htop \
+    screen \
+    sqlite3 \
+    libsqlite3-dev
 
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
-print_success "Python $PYTHON_VERSION detected"
-
-# Check Docker
+# 2. Установка Docker и Docker Compose
+log_info "2. Установка Docker и Docker Compose..."
 if ! command -v docker &> /dev/null; then
-    print_error "Docker is not installed. Please install Docker first."
-    exit 1
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    sudo usermod -aG docker $USER
+    rm get-docker.sh
+    log_success "Docker установлен"
+else
+    log_success "Docker уже установлен"
 fi
 
 if ! command -v docker-compose &> /dev/null; then
-    print_error "Docker Compose is not installed. Please install Docker Compose."
-    exit 1
-fi
-
-print_success "Docker $(docker --version) detected"
-print_success "Docker Compose $(docker-compose --version) detected"
-
-# Check ports availability
-print_info "Checking port availability..."
-PORTS=(8080 8081 8082 9090 3000 9093 9100)
-for port in "${PORTS[@]}"; do
-    if ss -tuln | grep -q ":$port "; then
-        print_warning "Port $port is already in use"
-    fi
-done
-
-# Step 2: Create project directory
-print_info "Step 2: Setting up project directory..."
-PROJECT_DIR="$HOME/blockchain-module"
-if [ ! -d "$PROJECT_DIR" ]; then
-    mkdir -p "$PROJECT_DIR"
-    print_success "Created project directory: $PROJECT_DIR"
+    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+        -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    log_success "Docker Compose установлен"
 else
-    print_warning "Project directory already exists: $PROJECT_DIR"
+    log_success "Docker Compose уже установлен"
 fi
 
-cd "$PROJECT_DIR"
+# 3. Создание структуры директорий
+log_info "3. Создание структуры директорий..."
+mkdir -p {configs,data,logs,backups,scripts,monitoring/{prometheus,grafana,alerts}}
 
-# Step 3: Clone repository or copy files
-print_info "Step 3: Getting source code..."
-if [ -d ".git" ]; then
-    print_info "Updating existing repository..."
-    git pull
-else
-    if [ -f "requirements.txt" ]; then
-        print_info "Source code already present"
-    else
-        print_error "Please place the source code in $PROJECT_DIR"
-        print_info "Either clone the repository or copy all files manually"
-        exit 1
-    fi
-fi
-
-# Step 4: Create virtual environment
-print_info "Step 4: Setting up Python virtual environment..."
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-    print_success "Virtual environment created"
-fi
-
-# Activate virtual environment
+# 4. Создание виртуального окружения Python
+log_info "4. Настройка Python окружения..."
+python3 -m venv venv
 source venv/bin/activate
 
-# Step 5: Install Python dependencies
-print_info "Step 5: Installing Python dependencies..."
-if [ -f "requirements.txt" ]; then
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    pip install -e .
-    print_success "Python dependencies installed"
-else
-    print_error "requirements.txt not found"
-    exit 1
-fi
+# 5. Установка Python зависимостей
+log_info "5. Установка Python зависимостей..."
+pip install --upgrade pip
+pip install aiohttp aiosqlite prometheus-client psutil requests
 
-# Step 6: Create necessary directories
-print_info "Step 6: Creating directories..."
-mkdir -p {configs,data,logs,prometheus_data,grafana_data,alertmanager_data}
+# Создание файла requirements.txt
+cat > requirements.txt << 'EOF'
+aiohttp>=3.8.0
+aiosqlite>=0.19.0
+prometheus-client>=0.17.0
+psutil>=5.9.0
+requests>=2.28.0
+asyncio>=3.4.3
+typing-extensions>=4.5.0
+pyyaml>=6.0
+EOF
 
-# Step 7: Copy configuration files
-print_info "Step 7: Setting up configuration..."
-if [ ! -f "configs/module_config.json" ]; then
-    if [ -f "module_config.json" ]; then
-        cp module_config.json configs/module_config.json
-        print_success "Configuration copied"
+pip install -r requirements.txt
+
+# 6. Копирование файлов модуля
+log_info "6. Настройка структуры модуля..."
+
+# Создание директории модуля
+mkdir -p blockchain_module
+
+# Копирование основных файлов (если они в текущей директории)
+copy_file() {
+    if [ -f "$1" ]; then
+        cp "$1" "blockchain_module/$1"
+        log_success "Скопирован: $1"
     else
-        print_warning "Creating default configuration..."
-        cat > configs/module_config.json << 'EOF'
+        log_warning "Файл не найден: $1"
+    fi
+}
+
+# Копирование основных модулей
+for file in __init__.py config.py connection_pool.py database.py blockchain_monitor.py \
+             funds_collector.py health_check.py monitoring.py nownodes_client.py \
+             rest_api.py users.py utils.py; do
+    copy_file "$file"
+done
+
+# 7. Настройка конфигурационных файлов
+log_info "7. Настройка конфигурационных файлов..."
+
+# Основной конфиг
+cat > configs/module_config.json << 'EOF'
 {
   "module_settings": {
     "api_key": "",
@@ -180,368 +179,399 @@ if [ ! -f "configs/module_config.json" ]; then
   }
 }
 EOF
-    fi
-fi
 
-# Create .env file
-if [ ! -f ".env" ]; then
-    cat > .env << 'EOF'
-# Blockchain Module Environment Variables
-NOWNODES_API_KEY=your_api_key_here
-
-# Docker Compose variables
-COMPOSE_PROJECT_NAME=blockchain-module
-PROMETHEUS_DATA=./prometheus_data
-GRAFANA_DATA=./grafana_data
-ALERTMANAGER_DATA=./alertmanager_data
-EOF
-    print_warning "Created .env file. Please update NOWNODES_API_KEY"
-fi
-
-# Step 8: Setup Docker monitoring stack
-print_info "Step 8: Setting up Docker monitoring stack..."
-
-# Create necessary Docker directories
-mkdir -p docker/{prometheus,grafana/provisioning/dashboards,grafana/provisioning/datasources,alertmanager}
-
-# Create Prometheus config
-cat > docker/prometheus/prometheus.yml << 'EOF'
+# Конфиг Prometheus
+cat > monitoring/prometheus/prometheus.yml << 'EOF'
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    environment: 'production'
 
 rule_files:
-  - "alerts.yml"
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ['alertmanager:9093']
+  - "/etc/prometheus/alerts.yml"
 
 scrape_configs:
   - job_name: 'blockchain_module'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    scheme: 'http'
+    
     static_configs:
       - targets: ['host.docker.internal:9090']
         labels:
-          service: 'blockchain_module'
+          instance: 'blockchain_module_main'
+          component: 'application'
 
   - job_name: 'node_exporter'
     static_configs:
       - targets: ['node-exporter:9100']
+        labels:
+          instance: 'blockchain_module_server'
+          component: 'system'
 
-  - job_name: 'cadvisor'
+  - job_name: 'prometheus'
     static_configs:
-      - targets: ['cadvisor:8080']
+      - targets: ['localhost:9090']
 EOF
 
-cat > docker/prometheus/alerts.yml << 'EOF'
+# Алёрты Prometheus
+cat > monitoring/prometheus/alerts.yml << 'EOF'
 groups:
-  - name: blockchain_alerts
+  - name: blockchain_module_alerts
     rules:
-      - alert: HighErrorRate
+      - alert: BlockchainModuleDown
+        expr: up{job="blockchain_module"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Blockchain module is down"
+          description: "Blockchain module has been down for more than 1 minute"
+      
+      - alert: HighAPIErrorRate
         expr: rate(blockchain_module_api_errors_total[5m]) / rate(blockchain_module_api_requests_total[5m]) > 0.1
         for: 2m
         labels:
           severity: warning
+          component: api
         annotations:
-          summary: "High error rate on {{ $labels.coin }}"
-          description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.coin }}"
-
-      - alert: WebSocketDisconnected
-        expr: blockchain_module_websocket_connections == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "WebSocket disconnected for {{ $labels.coin }}"
-          description: "WebSocket has been disconnected for 1 minute"
-
-      - alert: HighResponseTime
-        expr: histogram_quantile(0.95, rate(blockchain_module_api_request_duration_seconds_bucket[5m])) > 5
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High response time for {{ $labels.coin }}"
-          description: "95th percentile response time is {{ $value }}s"
+          summary: "High API error rate"
+          description: "API error rate is above 10% for 2 minutes"
 EOF
 
-# Create Alertmanager config
-cat > docker/alertmanager/alertmanager.yml << 'EOF'
-global:
-  smtp_smarthost: 'smtp.gmail.com:587'
-  smtp_from: 'alerts@blockchain-module.com'
-  smtp_auth_username: 'your_email@gmail.com'
-  smtp_auth_password: 'your_password'
-
-route:
-  group_by: ['alertname']
-  group_wait: 10s
-  group_interval: 10s
-  repeat_interval: 1h
-  receiver: 'email'
-
-receivers:
-  - name: 'email'
-    email_configs:
-      - to: 'admin@example.com'
+# Дашборд Grafana
+cat > monitoring/grafana/dashboard.json << 'EOF'
+{
+  "dashboard": {
+    "title": "Blockchain Module Monitoring",
+    "tags": ["blockchain", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Overview",
+        "type": "stat",
+        "gridPos": {"h": 3, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "blockchain_module_status",
+            "format": "time_series",
+            "legendFormat": "Module Status",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}
 EOF
 
-# Create Grafana datasource
-cat > docker/grafana/provisioning/datasources/datasource.yml << 'EOF'
-apiVersion: 1
+# 8. Настройка Docker Compose для мониторинга
+log_info "8. Настройка Docker Compose для мониторинга..."
 
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
+cat > docker-compose-monitoring.yml << 'EOF'
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: blockchain_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: blockchain_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: blockchain_node_exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
 EOF
 
-# Create Grafana dashboard config
-cat > docker/grafana/provisioning/dashboards/dashboard.yml << 'EOF'
-apiVersion: 1
+# 9. Создание скриптов управления
+log_info "9. Создание скриптов управления..."
 
-providers:
-  - name: 'default'
-    orgId: 1
-    folder: ''
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 10
-    options:
-      path: /etc/grafana/provisioning/dashboards
-EOF
-
-# Copy blockchain dashboard
-if [ -f "blockchain_dashboard.json" ]; then
-    cp blockchain_dashboard.json docker/grafana/dashboards/
-fi
-
-# Step 9: Start monitoring stack
-print_info "Step 9: Starting Docker monitoring stack..."
-docker-compose up -d
-
-# Wait for services to start
-print_info "Waiting for services to initialize..."
-sleep 10
-
-# Step 10: Initialize the system
-print_info "Step 10: Initializing Blockchain Module..."
-
-# Initialize database
-python3 -c "
-import asyncio
-import sys
-
-async def initialize_system():
-    try:
-        from blockchain_module.database import SQLiteDBManager
-        from blockchain_module.users import UserManager
-        
-        # Initialize database
-        db = SQLiteDBManager('data/blockchain_module.db')
-        await db.initialize()
-        
-        # Initialize user manager
-        user_manager = UserManager('data/blockchain_module.db')
-        await user_manager.initialize()
-        
-        print('✅ Database and user system initialized')
-        
-        # Get stats
-        stats = await db.get_stats()
-        print(f'📊 Database stats: {stats}')
-        
-        await db.close()
-        await user_manager.close()
-        
-    except Exception as e:
-        print(f'❌ Initialization error: {e}')
-        sys.exit(1)
-
-asyncio.run(initialize_system())
-"
-
-# Step 11: Run system tests
-print_info "Step 11: Running system tests..."
-
-# Test 1: Module import
-python3 -c "
-try:
-    from blockchain_module import get_module_info
-    info = get_module_info()
-    print('✅ Module import successful')
-    print(f'   Version: {info[\"version\"]}')
-    print(f'   Supported coins: {info[\"supported_coins\"]}')
-except Exception as e:
-    print(f'❌ Module import failed: {e}')
-"
-
-# Test 2: CLI test
-python3 -c "
-try:
-    from blockchain_module.cli import AdminCLI
-    print('✅ CLI module available')
-except ImportError as e:
-    print('⚠️  CLI module not available (optional)')
-except Exception as e:
-    print(f'⚠️  CLI check: {e}')
-"
-
-# Test 3: REST API test
-python3 -c "
-try:
-    from blockchain_module.rest_api import create_rest_api
-    print('✅ REST API module available')
-except ImportError as e:
-    print('⚠️  REST API module not available (optional)')
-except Exception as e:
-    print(f'⚠️  REST API check: {e}')
-"
-
-# Step 12: Create startup scripts
-print_info "Step 12: Creating management scripts..."
-
-# Create start script
-cat > start_blockchain.sh << 'EOF'
+# Скрипт запуска REST API
+cat > scripts/start_api.sh << 'EOF'
 #!/bin/bash
-# Start Blockchain Module with monitoring
-
-cd "$(dirname "$0")"
-
-echo "Starting Blockchain Module..."
-
-# Start monitoring stack
-docker-compose up -d
-
-# Start REST API
+cd "$(dirname "$0")/.."
 source venv/bin/activate
+export PYTHONPATH=$PYTHONPATH:$(pwd)
 python3 -c "
-import asyncio
 from blockchain_module.rest_api import run_rest_api
-import threading
-
-def start_api():
-    asyncio.run(run_rest_api(host='0.0.0.0', port=8080))
-
-api_thread = threading.Thread(target=start_api, daemon=True)
-api_thread.start()
-print('REST API started on port 8080')
+import asyncio
+asyncio.run(run_rest_api(host='0.0.0.0', port=8080))
 "
-
-# Start Prometheus metrics
-python3 -c "
-from blockchain_module import start_monitoring
-start_monitoring(port=9090)
-print('Prometheus metrics on port 9090')
-"
-
-echo "Blockchain Module is running!"
-echo "Access:"
-echo "  - REST API: http://localhost:8080"
-echo "  - Prometheus: http://localhost:9090"
-echo "  - Grafana: http://localhost:3000 (admin/admin)"
-echo ""
-echo "Press Ctrl+C to stop"
-wait
 EOF
+chmod +x scripts/start_api.sh
 
-# Create stop script
-cat > stop_blockchain.sh << 'EOF'
+# Скрипт запуска мониторинга
+cat > scripts/start_monitoring.sh << 'EOF'
 #!/bin/bash
-# Stop Blockchain Module
+cd "$(dirname "$0")/.."
+docker-compose -f docker-compose-monitoring.yml up -d
+echo "Мониторинг запущен:"
+echo "  Prometheus: http://localhost:9090"
+echo "  Grafana:    http://localhost:3000 (admin/admin)"
+echo "  Node Exporter: http://localhost:9100"
+EOF
+chmod +x scripts/start_monitoring.sh
 
-cd "$(dirname "$0")"
-
-echo "Stopping Blockchain Module..."
-
-# Stop Docker containers
-docker-compose down
-
-# Find and kill Python processes
+# Скрипт остановки всего
+cat > scripts/stop_all.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")/.."
 pkill -f "blockchain_module" 2>/dev/null || true
-pkill -f "rest_api" 2>/dev/null || true
-
-echo "Blockchain Module stopped"
+docker-compose -f docker-compose-monitoring.yml down
+echo "Все сервисы остановлены"
 EOF
+chmod +x scripts/stop_all.sh
 
-# Create status script
-cat > status_blockchain.sh << 'EOF'
+# Скрипт проверки статуса
+cat > scripts/status.sh << 'EOF'
 #!/bin/bash
-# Check Blockchain Module status
-
-cd "$(dirname "$0")"
-
+cd "$(dirname "$0")/.."
 echo "=== Blockchain Module Status ==="
-
-# Check Docker services
-echo "Docker Services:"
-docker-compose ps
-
 echo ""
-echo "Port Status:"
-PORTS=(8080 9090 3000 9093 9100)
-for port in "${PORTS[@]}"; do
-    if ss -tuln | grep -q ":$port "; then
-        echo "  Port $port: ✓ Listening"
-    else
-        echo "  Port $port: ✗ Not listening"
-    fi
-done
-
+echo "1. Python процессы:"
+pgrep -f "blockchain_module" && echo "  ✅ REST API запущен" || echo "  ❌ REST API не запущен"
 echo ""
-echo "Python Processes:"
-pgrep -f "python.*blockchain" && echo "  Blockchain processes: ✓ Running" || echo "  Blockchain processes: ✗ Not running"
-
+echo "2. Docker контейнеры:"
+docker-compose -f docker-compose-monitoring.yml ps
 echo ""
-echo "Database:"
-if [ -f "data/blockchain_module.db" ]; then
-    echo "  Database file: ✓ Present"
-    size=$(du -h "data/blockchain_module.db" | cut -f1)
-    echo "  Database size: $size"
-else
-    echo "  Database file: ✗ Missing"
-fi
+echo "3. Порт 8080 (REST API):"
+netstat -tlnp 2>/dev/null | grep :8080 || echo "  Порт 8080 не слушается"
+echo ""
+echo "4. Порт 9090 (Prometheus):"
+netstat -tlnp 2>/dev/null | grep :9090 || echo "  Порт 9090 не слушается"
+EOF
+chmod +x scripts/status.sh
+
+# 10. Создание systemd сервисов (опционально)
+log_info "10. Создание systemd сервисов..."
+
+# Сервис для REST API
+sudo tee /etc/systemd/system/blockchain-api.service > /dev/null << EOF
+[Unit]
+Description=Blockchain Module REST API
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$(pwd)
+Environment="PYTHONPATH=$(pwd)"
+ExecStart=$(pwd)/venv/bin/python3 -c "from blockchain_module.rest_api import run_rest_api; import asyncio; asyncio.run(run_rest_api(host='0.0.0.0', port=8080))"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-chmod +x start_blockchain.sh stop_blockchain.sh status_blockchain.sh
+# 11. Запрос API ключа
+log_info "11. Настройка API ключа..."
+echo ""
+read -p "Введите ваш Nownodes API ключ (или нажмите Enter для настройки позже): " api_key
+if [ ! -z "$api_key" ]; then
+    sed -i "s/\"api_key\": \"\"/\"api_key\": \"$api_key\"/g" configs/module_config.json
+    log_success "API ключ сохранен в конфигурации"
+else
+    log_warning "API ключ не установлен. Вы можете установить его позже в configs/module_config.json"
+fi
 
-# Step 13: Display installation summary
-print_info "Step 13: Installation complete!"
+# 12. Запуск сервисов
+echo ""
+read -p "Запустить мониторинг (Prometheus/Grafana) сейчас? (y/n): " start_monitoring
+if [[ $start_monitoring == "y" || $start_monitoring == "Y" ]]; then
+    log_info "Запуск мониторинга..."
+    docker-compose -f docker-compose-monitoring.yml up -d
+    log_success "Мониторинг запущен"
+fi
 
 echo ""
-echo "========================================="
-echo "     Blockchain Module Installation"
-echo "========================================="
+read -p "Запустить REST API сейчас? (y/n): " start_api
+if [[ $start_api == "y" || $start_api == "Y" ]]; then
+    log_info "Запуск REST API..."
+    source venv/bin/activate
+    export PYTHONPATH=$PYTHONPATH:$(pwd)
+    screen -dmS blockchain-api bash scripts/start_api.sh
+    sleep 3
+    if pgrep -f "blockchain_module" > /dev/null; then
+        log_success "REST API запущен в screen сессии"
+    else
+        log_error "Не удалось запустить REST API"
+    fi
+fi
+
+# 13. Создание финального скрипта управления
+cat > blockchain-manager.sh << 'EOF'
+#!/bin/bash
+# Управление Blockchain Module
+
+case "$1" in
+    start-api)
+        echo "Запуск REST API..."
+        cd "$(dirname "$0")"
+        source venv/bin/activate
+        export PYTHONPATH=$PYTHONPATH:$(pwd)
+        screen -dmS blockchain-api python3 -c "
+from blockchain_module.rest_api import run_rest_api
+import asyncio
+asyncio.run(run_rest_api(host='0.0.0.0', port=8080))
+"
+        echo "REST API запущен на порту 8080"
+        ;;
+    start-monitoring)
+        echo "Запуск мониторинга..."
+        docker-compose -f docker-compose-monitoring.yml up -d
+        echo "Мониторинг запущен:"
+        echo "  Prometheus: http://localhost:9090"
+        echo "  Grafana:    http://localhost:3000 (admin/admin)"
+        ;;
+    stop)
+        echo "Остановка всех сервисов..."
+        pkill -f "blockchain_module" 2>/dev/null || true
+        docker-compose -f docker-compose-monitoring.yml down
+        echo "Все сервисы остановлены"
+        ;;
+    status)
+        echo "=== Blockchain Module Status ==="
+        echo ""
+        echo "1. Python процессы:"
+        pgrep -f "blockchain_module" && echo "  ✅ REST API запущен" || echo "  ❌ REST API не запущен"
+        echo ""
+        echo "2. Docker контейнеры:"
+        docker-compose -f docker-compose-monitoring.yml ps
+        echo ""
+        echo "3. Порт 8080 (REST API):"
+        netstat -tlnp 2>/dev/null | grep :8080 || echo "  Порт 8080 не слушается"
+        echo ""
+        echo "4. Порт 9090 (Prometheus):"
+        netstat -tlnp 2>/dev/null | grep :9090 || echo "  Порт 9090 не слушается"
+        ;;
+    logs-api)
+        echo "Логи REST API:"
+        screen -r blockchain-api
+        ;;
+    logs-monitoring)
+        echo "Логи мониторинга:"
+        docker-compose -f docker-compose-monitoring.yml logs -f
+        ;;
+    update-config)
+        echo "Обновление конфигурации..."
+        cd "$(dirname "$0")"
+        nano configs/module_config.json
+        echo "Конфигурация обновлена. Перезапустите сервисы."
+        ;;
+    cli)
+        echo "Запуск CLI интерфейса..."
+        cd "$(dirname "$0")"
+        source venv/bin/activate
+        python3 -c "
+from blockchain_module import start_cli
+import asyncio
+asyncio.run(start_cli())
+"
+        ;;
+    *)
+        echo "Использование: $0 {start-api|start-monitoring|stop|status|logs-api|logs-monitoring|update-config|cli}"
+        echo ""
+        echo "Команды:"
+        echo "  start-api        - Запустить REST API"
+        echo "  start-monitoring - Запустить мониторинг (Prometheus/Grafana)"
+        echo "  stop             - Остановить все сервисы"
+        echo "  status           - Показать статус сервисов"
+        echo "  logs-api         - Показать логи REST API"
+        echo "  logs-monitoring  - Показать логи мониторинга"
+        echo "  update-config    - Редактировать конфигурацию"
+        echo "  cli              - Запустить CLI интерфейс"
+        exit 1
+        ;;
+esac
+EOF
+
+chmod +x blockchain-manager.sh
+
+# 14. Финальный вывод
+log_success "Установка завершена успешно!"
 echo ""
-echo "📁 Project directory: $PROJECT_DIR"
-echo "🐍 Python virtual environment: $PROJECT_DIR/venv"
-echo "🐳 Docker monitoring stack: Running"
+echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║            Blockchain Module v2.0 установлен!            ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo "🔧 Next steps:"
-echo "1. Edit configs/module_config.json with your Nownodes API key"
-echo "2. Configure email in docker/alertmanager/alertmanager.yml for alerts"
-echo "3. Review and adjust ports in docker-compose.yml if needed"
+echo "📊 СЕРВИСЫ:"
+echo "  • REST API:           http://localhost:8080"
+echo "  • Prometheus:         http://localhost:9090"
+echo "  • Grafana:            http://localhost:3000 (admin/admin)"
+echo "  • Node Exporter:      http://localhost:9100"
 echo ""
-echo "🚀 Start the system:"
-echo "   ./start_blockchain.sh"
+echo "🔧 УПРАВЛЕНИЕ:"
+echo "  ./blockchain-manager.sh [команда]"
 echo ""
-echo "🛑 Stop the system:"
-echo "   ./stop_blockchain.sh"
+echo "📝 ОСНОВНЫЕ КОМАНДЫ:"
+echo "  ./blockchain-manager.sh start-api        # Запустить REST API"
+echo "  ./blockchain-manager.sh start-monitoring # Запустить мониторинг"
+echo "  ./blockchain-manager.sh status           # Статус всех сервисов"
+echo "  ./blockchain-manager.sh cli              # CLI интерфейс"
 echo ""
-echo "📊 Check status:"
-echo "   ./status_blockchain.sh"
+echo "⚙️  КОНФИГУРАЦИЯ:"
+echo "  Файл конфигурации:    configs/module_config.json"
+echo "  База данных:          data/blockchain_module.db"
+echo "  Логи:                 logs/"
 echo ""
-echo "🌐 Access URLs:"
-echo "   - REST API: http://localhost:8080"
-echo "   - Prometheus: http://localhost:9090"
-echo "   - Grafana: http://localhost:3000 (admin/admin)"
-echo "   - Alertmanager: http://localhost:9093"
+echo "🔐 АДМИНИСТРАТИВНЫЙ ДОСТУП:"
+echo "  Для доступа к API используйте API ключ администратора"
+echo "  (сгенерирован автоматически при первом запуске)"
 echo ""
-echo "📝 Admin API Key was generated during setup."
-echo "   Check the output above or run: blockchain-cli users list"
+echo "📚 ДОКУМЕНТАЦИЯ:"
+echo "  Полная документация:  https://github.com/ваш-репозиторий"
 echo ""
-echo "========================================="
-print_success "Installation completed successfully!"
+echo -e "${YELLOW}⚠️  ПЕРЕЗАГРУЗИТЕ СИСТЕМУ или выполните: newgrp docker${NC}"
+echo -e "${YELLOW}   чтобы права Docker вступили в силу${NC}"
