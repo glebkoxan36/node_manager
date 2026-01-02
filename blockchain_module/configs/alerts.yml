@@ -1,0 +1,92 @@
+groups:
+  - name: blockchain_module_alerts
+    rules:
+      - alert: BlockchainModuleDown
+        expr: up{job="blockchain_module"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Blockchain module is down"
+          description: "Blockchain module has been down for more than 1 minute"
+      
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for 5 minutes"
+      
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 80% for 5 minutes"
+      
+      - alert: HighAPIErrorRate
+        expr: rate(blockchain_module_api_errors_total[5m]) / rate(blockchain_module_api_requests_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API error rate for {{ $labels.coin }}"
+          description: "API error rate is above 10% for 2 minutes"
+      
+      - alert: WebSocketDisconnected
+        expr: blockchain_module_websocket_connections == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: websocket
+        annotations:
+          summary: "WebSocket disconnected for {{ $labels.coin }}"
+          description: "WebSocket has been disconnected for 2 minutes"
+      
+      - alert: LowTransactionProcessingRate
+        expr: rate(blockchain_module_transactions_processed_total[10m]) < 1
+        for: 5m
+        labels:
+          severity: warning
+          component: transactions
+        annotations:
+          summary: "Low transaction processing rate for {{ $labels.coin }}"
+          description: "Less than 1 transaction per minute for 5 minutes"
+      
+      - alert: HighCollectionFailureRate
+        expr: rate(blockchain_module_funds_collections_total{status="failed"}[30m]) / rate(blockchain_module_funds_collections_total[30m]) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+          component: collections
+        annotations:
+          summary: "High funds collection failure rate for {{ $labels.coin }}"
+          description: "Collection failure rate is above 30% for 5 minutes"
+      
+      - alert: HighAPIResponseTime
+        expr: histogram_quantile(0.95, rate(blockchain_module_api_request_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API response time for {{ $labels.coin }}"
+          description: "95th percentile API response time is above 5 seconds for 2 minutes"
+      
+      - alert: LowCacheHitRate
+        expr: rate(blockchain_module_cache_hits_total[10m]) / (rate(blockchain_module_cache_hits_total[10m]) + rate(blockchain_module_cache_misses_total[10m])) < 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate for {{ $labels.coin }}"
+          description: "Cache hit rate is below 50% for 5 minutes"

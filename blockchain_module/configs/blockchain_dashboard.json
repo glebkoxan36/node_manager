@@ -1,0 +1,225 @@
+{
+  "dashboard": {
+    "title": "Blockchain Module Monitoring",
+    "tags": ["blockchain", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Overview",
+        "type": "stat",
+        "gridPos": {"h": 3, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "blockchain_module_status",
+            "format": "time_series",
+            "legendFormat": "Module Status",
+            "refId": "A"
+          },
+          {
+            "expr": "blockchain_module_uptime_seconds",
+            "format": "time_series",
+            "legendFormat": "Uptime",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 2,
+        "title": "API Requests per Second",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 3},
+        "targets": [
+          {
+            "expr": "rate(blockchain_module_api_requests_total[5m])",
+            "legendFormat": "{{coin}} - {{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": {"show": true, "placement": "bottom"},
+          "tooltip": {"mode": "multi"}
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active WebSocket Connections",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 0, "y": 11},
+        "targets": [
+          {
+            "expr": "blockchain_module_websocket_connections",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "min": 0,
+          "max": 10,
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 2},
+              {"color": "green", "value": 5}
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Transaction Processing Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 3},
+        "targets": [
+          {
+            "expr": "rate(blockchain_module_transactions_processed_total[5m])",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "API Response Time (95th percentile)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(blockchain_module_api_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Funds Collection Success Rate",
+        "type": "gauge",
+        "gridPos": {"h": 5, "w": 6, "x": 6, "y": 11},
+        "targets": [
+          {
+            "expr": "sum(rate(blockchain_module_funds_collections_total{status=\"success\"}[5m])) / sum(rate(blockchain_module_funds_collections_total[5m])) * 100",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "green", "value": 90}
+            ]
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "System Resources",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "blockchain_module_cpu_usage_percent",
+            "legendFormat": "CPU Usage",
+            "refId": "A"
+          },
+          {
+            "expr": "blockchain_module_memory_usage_bytes / 1024 / 1024",
+            "legendFormat": "Memory Usage (MB)",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Monitored Addresses",
+        "type": "stat",
+        "gridPos": {"h": 3, "w": 6, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "blockchain_module_monitored_addresses",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal"
+        }
+      },
+      {
+        "id": 9,
+        "title": "Cache Performance",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 27},
+        "targets": [
+          {
+            "expr": "rate(blockchain_module_cache_hits_total[5m]) / (rate(blockchain_module_cache_hits_total[5m]) + rate(blockchain_module_cache_misses_total[5m])) * 100",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Error Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 27},
+        "targets": [
+          {
+            "expr": "rate(blockchain_module_api_errors_total[5m]) / rate(blockchain_module_api_requests_total[5m]) * 100",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Total Collected Amount",
+        "type": "stat",
+        "gridPos": {"h": 3, "w": 6, "x": 6, "y": 24},
+        "targets": [
+          {
+            "expr": "blockchain_module_collected_amount_total",
+            "legendFormat": "{{coin}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "fieldOptions": {
+            "unit": "currencyUSD"
+          }
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}

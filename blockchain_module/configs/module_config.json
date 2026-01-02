@@ -1,0 +1,55 @@
+{
+  "module_settings": {
+    "api_key": "YOUR_NOWNODES_API_KEY_HERE",
+    "log_level": "INFO",
+    "connection_pool_size": 10,
+    "default_confirmations": 3,
+    "max_reconnect_attempts": 10,
+    "monitoring": {
+      "enabled": true,
+      "prometheus_port": 9090,
+      "metrics_prefix": "blockchain_module"
+    },
+    "rest_api": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080,
+      "api_key_required": true,
+      "rate_limit": 100,
+      "enable_auth": true
+    },
+    "multiuser": {
+      "enabled": true,
+      "default_user_quotas": {
+        "max_monitored_addresses": 100,
+        "max_daily_api_calls": 10000,
+        "max_concurrent_monitors": 5,
+        "can_collect_funds": false,
+        "can_create_addresses": true,
+        "can_view_transactions": true
+      },
+      "admin_api_key": "",
+      "session_timeout": 3600
+    }
+  },
+  "coins": {
+    "LTC": {
+      "symbol": "LTC",
+      "name": "Litecoin",
+      "decimals": 8,
+      "blockbook_url": "https://ltcbook.nownodes.io",
+      "required_confirmations": 3,
+      "min_collection_amount": 0.001,
+      "collection_fee": 0.0001
+    },
+    "DOGE": {
+      "symbol": "DOGE",
+      "name": "Dogecoin",
+      "decimals": 8,
+      "blockbook_url": "https://dogebook.nownodes.io",
+      "required_confirmations": 6,
+      "min_collection_amount": 1.0,
+      "collection_fee": 0.1
+    }
+  }
+}
