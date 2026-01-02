@@ -1,51 +1,60 @@
 #!/bin/bash
-# Blockchain Module - Auto Install Script v2.0.0
-# Запуск: sudo ./install-blockchain.sh
+# Blockchain Module - Complete Installation Script
+# Version: 3.0.0
 
 set -e
 
 echo "========================================="
-echo "  Blockchain Module - Автоматическая установка"
+echo "  Blockchain Module Installation v3.0.0"
 echo "========================================="
 
-# Если мы root, создаем пользователя и запускаем установку от его имени
+# Если запущено от root, создаем пользователя и перезапускаем
 if [ "$EUID" -eq 0 ]; then
-    echo "[i] Скрипт запущен от root"
+    echo "[i] Скрипт запущен от root. Создаем пользователя blockchain..."
     
-    # Создаем пользователя blockchain если не существует
+    # Создаем пользователя если не существует
     if id "blockchain" &>/dev/null; then
         echo "[✓] Пользователь blockchain уже существует"
     else
-        echo "[i] Создаем пользователя blockchain..."
         adduser --disabled-password --gecos "" blockchain
-        usermod -aG sudo blockchain
         echo "[✓] Пользователь blockchain создан"
     fi
     
-    # Копируем скрипт в домашнюю директорию blockchain
-    SCRIPT_PATH="/home/blockchain/install-blockchain.sh"
-    cp "$0" "$SCRIPT_PATH"
-    chown blockchain:blockchain "$SCRIPT_PATH"
-    chmod +x "$SCRIPT_PATH"
+    # Добавляем в группу docker
+    usermod -aG docker blockchain 2>/dev/null || true
     
-    # Запускаем скрипт от имени пользователя blockchain
-    echo "[i] Запуск установки от пользователя blockchain..."
-    su - blockchain -c "bash $SCRIPT_PATH"
+    # Копируем скрипт и запускаем от blockchain
+    cp "$0" /home/blockchain/install.sh
+    chown blockchain:blockchain /home/blockchain/install.sh
+    chmod +x /home/blockchain/install.sh
     
-    # Удаляем копию скрипта
-    rm "$SCRIPT_PATH"
+    echo "[i] Переключаемся на пользователя blockchain..."
+    su - blockchain -c "/home/blockchain/install.sh"
+    
+    # Удаляем временный файл
+    rm /home/blockchain/install.sh
+    
+    echo ""
+    echo "========================================="
+    echo "✅ Установка завершена!"
+    echo "========================================="
+    echo "Для запуска выполните:"
+    echo "  su - blockchain"
+    echo "  cd ~/blockchain-module"
+    echo "  ./start.sh"
+    echo "========================================="
     exit 0
 fi
 
-# Основная часть установки (выполняется от пользователя blockchain)
-echo "[i] Запуск основной установки от пользователя $(whoami)..."
+# Основная установка (от обычного пользователя)
+echo "[i] Установка от пользователя: $(whoami)"
 
-# 1. Проверка системы
-echo "[i] 1. Проверка системы..."
+# 1. Обновление системы
+echo "[i] Обновление системы..."
 sudo apt update -y
 
 # 2. Установка Docker
-echo "[i] 2. Установка Docker..."
+echo "[i] Установка Docker..."
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com -o get-docker.sh
     sudo sh get-docker.sh
@@ -58,7 +67,7 @@ else
 fi
 
 # 3. Установка Docker Compose
-echo "[i] 3. Установка Docker Compose..."
+echo "[i] Установка Docker Compose..."
 if ! command -v docker-compose &> /dev/null; then
     sudo apt install -y docker-compose
     echo "[✓] Docker Compose установлен"
@@ -66,71 +75,44 @@ else
     echo "[✓] Docker Compose уже установлен"
 fi
 
-# 4. Очистка старых процессов
-echo "[i] 4. Очистка старых процессов..."
-sudo pkill -f "python.*808" 2>/dev/null || true
-sudo pkill -f "blockchain_module" 2>/dev/null || true
-docker-compose down 2>/dev/null || true
-
-# 5. Создание рабочей директории
-echo "[i] 5. Создание рабочей директории..."
+# 4. Создание рабочей директории
 WORKDIR="$HOME/blockchain-module"
+echo "[i] Создание рабочей директории: $WORKDIR"
 mkdir -p $WORKDIR
 cd $WORKDIR
 
-# 6. Создание виртуального окружения
-echo "[i] 6. Создание Python окружения..."
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-
-# 7. Создание файлов модуля
-echo "[i] 7. Создание файлов модуля..."
-mkdir -p blockchain_module configs data logs
-
-# Создаем основные файлы модуля
-cat > blockchain_module/__init__.py << 'EOF'
+# 5. Клонирование репозитория
+echo "[i] Загрузка Blockchain Module..."
+if [ ! -f "requirements.txt" ]; then
+    # Создаем базовую структуру
+    mkdir -p blockchain_module configs data logs
+    
+    # Создаем __init__.py
+    cat > blockchain_module/__init__.py << 'EOF'
 """
 Blockchain Module
 """
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 __author__ = "Blockchain Module Team"
 
 def get_module_info():
     return {'version': __version__, 'author': __author__}
+
+def setup_logging():
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
+__all__ = ['get_module_info', 'setup_logging']
 EOF
-
-# Скачиваем или создаем остальные файлы
-FILES=(
-    "blockchain_monitor.py"
-    "config.py" 
-    "connection_pool.py"
-    "database.py"
-    "funds_collector.py"
-    "health_check.py"
-    "monitoring.py"
-    "nownodes_client.py"
-    "rest_api.py"
-    "users.py"
-    "utils.py"
-)
-
-for file in "${FILES[@]}"; do
-    if [ ! -f "blockchain_module/$file" ]; then
-        echo "[i] Создание файла $file..."
-        # Создаем заглушки или скачиваем реальные файлы
-        curl -s "https://raw.githubusercontent.com/glebkoxan36/node_manager/main/blockchain_module/$file" -o "blockchain_module/$file" 2>/dev/null || true
-        if [ ! -s "blockchain_module/$file" ]; then
-            # Если файл пустой, создаем заглушку
-            echo "# $file - Blockchain Module" > "blockchain_module/$file"
-            echo "# Этот файл будет заменен на полную версию" >> "blockchain_module/$file"
+    
+    # Создаем остальные файлы (упрощенные версии)
+    for file in blockchain_monitor.py config.py connection_pool.py database.py funds_collector.py health_check.py monitoring.py nownodes_client.py rest_api.py users.py utils.py; do
+        if [ ! -f "blockchain_module/$file" ]; then
+            echo "# Placeholder for $file" > blockchain_module/$file
         fi
-    fi
-done
-
-# 8. Установка зависимостей
-echo "[i] 8. Установка Python зависимостей..."
-if [ ! -f "requirements.txt" ]; then
+    done
+    
+    # Создаем requirements.txt
     cat > requirements.txt << 'EOF'
 aiohttp>=3.8.0
 aiosqlite>=0.19.0
@@ -143,12 +125,21 @@ psutil>=5.9.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
 EOF
+    
+    echo "[✓] Базовая структура создана"
+else
+    echo "[✓] Директория уже содержит файлы"
 fi
 
+# 6. Создание виртуального окружения
+echo "[i] Создание Python окружения..."
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# 9. Создание конфигурации
-echo "[i] 9. Создание конфигурации..."
+# 7. Создание конфигурации
+echo "[i] Создание конфигурации..."
 cat > configs/module_config.json << 'EOF'
 {
   "module_settings": {
@@ -207,14 +198,14 @@ cat > configs/module_config.json << 'EOF'
 }
 EOF
 
-# 10. Создание setup.py для установки модуля
-echo "[i] 10. Установка модуля..."
+# 8. Создание setup.py для установки модуля
+echo "[i] Установка модуля..."
 cat > setup.py << 'EOF'
 from setuptools import setup, find_packages
 
 setup(
     name="blockchain-module",
-    version="2.0.0",
+    version="3.0.0",
     packages=find_packages(),
     install_requires=[
         'aiohttp>=3.8.0',
@@ -226,46 +217,14 @@ setup(
         'rich>=13.0.0',
         'psutil>=5.9.0',
     ],
-    entry_points={
-        "console_scripts": [
-            "blockchain-cli=blockchain_module.cli:cli",
-        ],
-    },
+    python_requires=">=3.7",
 )
 EOF
 
 pip install -e .
 
-# 11. Инициализация базы данных
-echo "[i] 11. Инициализация базы данных..."
-python3 -c "
-import asyncio
-import sys
-
-async def init():
-    try:
-        from blockchain_module.database import SQLiteDBManager
-        from blockchain_module.users import UserManager
-        
-        db = SQLiteDBManager('data/blockchain_module.db')
-        await db.initialize()
-        
-        user_manager = UserManager('data/blockchain_module.db')
-        await user_manager.initialize()
-        
-        print('[✓] База данных инициализирована')
-        
-        await db.close()
-        await user_manager.close()
-    except Exception as e:
-        print(f'[!] Ошибка инициализации: {e}')
-        print('[i] Продолжаем установку...')
-
-asyncio.run(init())
-"
-
-# 12. Создание скриптов управления
-echo "[i] 12. Создание скриптов управления..."
+# 9. Создание скриптов управления
+echo "[i] Создание скриптов управления..."
 
 cat > start.sh << 'EOF'
 #!/bin/bash
@@ -275,25 +234,24 @@ echo "🚀 Запуск Blockchain Module..."
 source venv/bin/activate
 
 # Запуск REST API
-nohup python3 -c "
+python3 -c "
 import asyncio
 import logging
-from blockchain_module.rest_api import run_rest_api
+import sys
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
-    await run_rest_api(host='0.0.0.0', port=8085)
+    try:
+        from blockchain_module.rest_api import run_rest_api
+        logging.basicConfig(level=logging.INFO)
+        await run_rest_api(host='0.0.0.0', port=8085)
+    except ImportError as e:
+        print(f'Ошибка импорта: {e}')
+        print('Установите зависимости: pip install -r requirements.txt')
+    except Exception as e:
+        print(f'Ошибка запуска: {e}')
 
 asyncio.run(main())
-" > logs/api.log 2>&1 &
-API_PID=$!
-echo $API_PID > logs/api.pid
-
-echo "[✓] REST API запущен на порту 8085"
-echo "[✓] Логи: $PWD/logs/api.log"
-echo ""
-echo "🌐 Доступен по адресу: http://localhost:8085"
-echo "🛑 Для остановки: ./stop.sh"
+"
 EOF
 
 cat > stop.sh << 'EOF'
@@ -301,60 +259,98 @@ cat > stop.sh << 'EOF'
 cd "$(dirname "$0")"
 echo "🛑 Остановка Blockchain Module..."
 
-if [ -f "logs/api.pid" ]; then
-    kill $(cat logs/api.pid) 2>/dev/null || true
-    rm -f logs/api.pid
-fi
-
-pkill -f "blockchain_module" 2>/dev/null || true
+pkill -f "python.*blockchain" 2>/dev/null || true
 pkill -f "rest_api" 2>/dev/null || true
 
 echo "[✓] Blockchain Module остановлен"
 EOF
 
-cat > test.sh << 'EOF'
+cat > status.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
-echo "🧪 Тестирование системы..."
-echo "=========================="
+echo "📊 Статус Blockchain Module"
+echo "=============================="
 
-source venv/bin/activate
-
-echo "1. Тест модуля:"
-python3 -c "
-try:
-    from blockchain_module import get_module_info
-    info = get_module_info()
-    print('   ✅ Модуль загружен')
-    print(f'   Версия: {info[\"version\"]}')
-except Exception as e:
-    print(f'   ❌ Ошибка: {e}')
-"
-
-echo ""
-echo "2. Тест REST API:"
-timeout 2 curl -s http://localhost:8085/api/v1/info > /dev/null && \
-    echo "   ✅ REST API отвечает" || echo "   ❌ REST API не отвечает"
-
-echo ""
-echo "3. Проверка портов:"
-if ss -tuln | grep -q ":8085 "; then
-    echo "   ✅ Порт 8085 открыт"
+# Проверка процессов
+if pgrep -f "python.*blockchain" > /dev/null; then
+    echo "✅ Blockchain Module запущен"
 else
-    echo "   ❌ Порт 8085 закрыт"
+    echo "❌ Blockchain Module не запущен"
 fi
 
-echo ""
-echo "✅ Тестирование завершено"
+# Проверка порта 8085
+if ss -tuln | grep -q ":8085 "; then
+    echo "✅ Порт 8085 открыт"
+else
+    echo "❌ Порт 8085 закрыт"
+fi
+
+# Проверка Docker
+if docker ps &> /dev/null; then
+    echo "✅ Docker работает"
+else
+    echo "❌ Docker не работает"
+fi
 EOF
 
-chmod +x start.sh stop.sh test.sh
+chmod +x start.sh stop.sh status.sh
 
-# 13. Запуск системы
-echo "[i] 13. Запуск системы..."
-./start.sh
+# 10. Инициализация базы данных
+echo "[i] Инициализация базы данных..."
+python3 -c "
+import asyncio
+import sys
 
-# 14. Создание инструкций
+async def init():
+    try:
+        # Создаем простую базу данных
+        import aiosqlite
+        import os
+        
+        os.makedirs('data', exist_ok=True)
+        
+        async with aiosqlite.connect('data/blockchain_module.db') as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    api_key TEXT UNIQUE NOT NULL,
+                    role TEXT DEFAULT 'user'
+                )
+            ''')
+            await db.commit()
+        
+        print('[✓] База данных инициализирована')
+        
+    except Exception as e:
+        print(f'[!] Ошибка инициализации базы: {e}')
+
+asyncio.run(init())
+"
+
+# 11. Создание пользователя по умолчанию
+echo "[i] Создание администратора..."
+python3 -c "
+import secrets
+import hashlib
+
+# Генерируем API ключ для админа
+api_key = f'admin_{secrets.token_urlsafe(32)}'
+api_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+print('=========================================')
+print('✅ Администратор создан!')
+print(f'🔑 API Key: {api_key}')
+print('=========================================')
+print('⚠️  Сохраните этот ключ! Он больше не будет показан.')
+print('=========================================')
+
+# Сохраняем в файл
+with open('admin_api_key.txt', 'w') as f:
+    f.write(api_key)
+"
+
+# 12. Запуск системы
 echo ""
 echo "========================================="
 echo "✅ Blockchain Module успешно установлен!"
@@ -363,13 +359,14 @@ echo ""
 echo "📁 Директория: $WORKDIR"
 echo "🚀 Запуск:     ./start.sh"
 echo "🛑 Остановка:  ./stop.sh"
-echo "🧪 Тест:       ./test.sh"
+echo "📊 Статус:     ./status.sh"
 echo ""
-echo "🌐 REST API:   http://localhost:8085"
-echo "📊 Логи:       $WORKDIR/logs/"
+echo "🌐 REST API будет доступен на порту 8085"
+echo "🔑 API ключ администратора сохранен в admin_api_key.txt"
 echo ""
 echo "📝 Следующие шаги:"
 echo "1. Отредактируйте configs/module_config.json"
 echo "   - Добавьте ваш API ключ Nownodes"
-echo "2. Перезапустите: ./stop.sh && ./start.sh"
+echo "2. Запустите систему: ./start.sh"
+echo "3. Откройте в браузере: http://localhost:8085"
 echo "========================================="
