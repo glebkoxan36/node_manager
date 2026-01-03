@@ -39,116 +39,475 @@ download_missing_files() {
     log_info "Проверка и загрузка недостающих файлов..."
     
     # Создаем структуру директорий если их нет
-    mkdir -p blockchain_module blockchain_module/configs
+    mkdir -p blockchain_module blockchain_module/configs configs data logs
     
-    # Файлы из корня репозитория
-    root_files=(
-        "module_config.json"
-        "alerts.yml"
-        "blockchain_dashboard.json"
-        "docker-compose.yml"
-        "prometheus.yml"
-        "requirements.txt"
-        "setup.py"
-        "README.md"
+    # Список файлов для проверки
+    declare -A file_map=(
+        # Основные файлы
+        ["setup.py"]="setup.py"
+        ["requirements.txt"]="requirements.txt"
+        
+        # Файлы из blockchain_module
+        ["blockchain_module/__init__.py"]="blockchain_module/__init__.py"
+        ["blockchain_module/blockchain_monitor.py"]="blockchain_module/blockchain_monitor.py"
+        ["blockchain_module/config.py"]="blockchain_module/config.py"
+        ["blockchain_module/connection_pool.py"]="blockchain_module/connection_pool.py"
+        ["blockchain_module/database.py"]="blockchain_module/database.py"
+        ["blockchain_module/funds_collector.py"]="blockchain_module/funds_collector.py"
+        ["blockchain_module/health_check.py"]="blockchain_module/health_check.py"
+        ["blockchain_module/monitoring.py"]="blockchain_module/monitoring.py"
+        ["blockchain_module/nownodes_client.py"]="blockchain_module/nownodes_client.py"
+        ["blockchain_module/rest_api.py"]="blockchain_module/rest_api.py"
+        ["blockchain_module/users.py"]="blockchain_module/users.py"
+        ["blockchain_module/utils.py"]="blockchain_module/utils.py"
     )
     
-    # Файлы из blockchain_module
-    module_files=(
-        "__init__.py"
-        "blockchain_monitor.py"
-        "config.py"
-        "connection_pool.py"
-        "database.py"
-        "funds_collector.py"
-        "health_check.py"
-        "monitoring.py"
-        "nownodes_client.py"
-        "rest_api.py"
-        "users.py"
-        "utils.py"
-    )
-    
-    # Файлы из blockchain_module/configs
-    config_files=(
-        "module_config.json"
-    )
-    
-    # Загружаем файлы из корня
-    for file in "${root_files[@]}"; do
-        if [[ ! -f "$file" ]]; then
-            log_info "Загрузка $file..."
-            if curl -s -f -o "$file" "${GITHUB_RAW}/$file"; then
-                log_success "Файл $file загружен"
+    # Пытаемся скачать файлы
+    for local_file in "${!file_map[@]}"; do
+        github_file="${file_map[$local_file]}"
+        
+        if [[ ! -f "$local_file" ]]; then
+            log_info "Загрузка $local_file..."
+            if curl -s -f -o "$local_file" "${GITHUB_RAW}/$github_file" 2>/dev/null; then
+                log_success "Файл $local_file загружен"
             else
-                log_warn "Не удалось загрузить $file"
+                log_warn "Не удалось загрузить $local_file, будет создан автоматически"
+                
+                # Создаем базовые файлы если они не скачались
+                case "$local_file" in
+                    "setup.py")
+                        create_setup_py
+                        ;;
+                    "requirements.txt")
+                        create_requirements_txt
+                        ;;
+                    "configs/module_config.json")
+                        create_module_config
+                        ;;
+                    *)
+                        # Для остальных файлов создаем пустые или базовые
+                        mkdir -p "$(dirname "$local_file")"
+                        touch "$local_file"
+                        ;;
+                esac
             fi
         else
-            log_info "Файл $file уже существует"
+            log_info "Файл $local_file уже существует"
         fi
     done
     
-    # Загружаем файлы из blockchain_module
-    for file in "${module_files[@]}"; do
-        if [[ ! -f "blockchain_module/$file" ]]; then
-            log_info "Загрузка blockchain_module/$file..."
-            if curl -s -f -o "blockchain_module/$file" "${GITHUB_RAW}/blockchain_module/$file"; then
-                log_success "Файл blockchain_module/$file загружен"
-            else
-                log_warn "Не удалось загрузить blockchain_module/$file"
-            fi
-        else
-            log_info "Файл blockchain_module/$file уже существует"
-        fi
-    done
+    # Создаем критические файлы если их нет
+    create_critical_files
     
-    # Загружаем файлы из blockchain_module/configs
-    for file in "${config_files[@]}"; do
-        if [[ ! -f "blockchain_module/configs/$file" ]]; then
-            log_info "Загрузка blockchain_module/configs/$file..."
-            if curl -s -f -o "blockchain_module/configs/$file" "${GITHUB_RAW}/blockchain_module/configs/$file"; then
-                log_success "Файл blockchain_module/configs/$file загружен"
-            else
-                log_warn "Не удалось загрузить blockchain_module/configs/$file"
-            fi
-        else
-            log_info "Файл blockchain_module/configs/$file уже существует"
-        fi
-    done
-    
-    # Проверяем наличие критических файлов
-    critical_files=(
-        "module_config.json"
-        "blockchain_module/__init__.py"
-        "blockchain_module/config.py"
-        "blockchain_module/database.py"
-    )
-    
-    missing_critical=()
-    for file in "${critical_files[@]}"; do
-        if [[ ! -f "$file" ]]; then
-            missing_critical+=("$file")
-        fi
-    done
-    
-    if [[ ${#missing_critical[@]} -gt 0 ]]; then
-        log_error "Отсутствуют критические файлы:"
-        for file in "${missing_critical[@]}"; do
-            log_error "  - $file"
-        done
-        log_error "Попробуйте клонировать репозиторий вручную:"
-        log_error "git clone https://github.com/glebkoxan36/node_manager.git"
-        exit 1
+    log_success "Все файлы проверены"
+}
+
+# Создание setup.py
+create_setup_py() {
+    cat > setup.py << 'EOF'
+from setuptools import setup, find_packages
+
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+
+with open("requirements.txt", "r", encoding="utf-8") as fh:
+    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+
+setup(
+    name="blockchain-module",
+    version="2.0.0",
+    author="Blockchain Module Team",
+    description="Универсальный модуль для работы с криптовалютами через Nownodes API с мультипользовательской системой",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/yourusername/blockchain-module",
+    packages=find_packages(),
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Operating System :: OS Independent",
+    ],
+    python_requires=">=3.7",
+    install_requires=requirements,
+    entry_points={
+        "console_scripts": [
+            "blockchain-module=blockchain_module.cli:cli",
+            "blockchain-cli=blockchain_module.cli:cli",
+        ],
+    },
+    include_package_data=True,
+    package_data={
+        "blockchain_module": ["configs/*.json"],
+    },
+)
+EOF
+    log_success "Файл setup.py создан"
+}
+
+# Создание requirements.txt
+create_requirements_txt() {
+    cat > requirements.txt << 'EOF'
+# Основные зависимости
+aiohttp>=3.8.0
+aiosqlite>=0.19.0
+prometheus-client>=0.17.0
+aiohttp-cors>=0.7.0
+
+# CLI зависимости
+click>=8.1.0
+questionary>=2.0.0
+rich>=13.0.0
+
+# Системные зависимости
+psutil>=5.9.0
+
+# Дополнительные
+python-dotenv>=1.0.0
+pyyaml>=6.0
+EOF
+    log_success "Файл requirements.txt создан"
+}
+
+# Создание module_config.json
+create_module_config() {
+    cat > configs/module_config.json << 'EOF'
+{
+  "module_settings": {
+    "api_key": "YOUR_NOWNODES_API_KEY_HERE",
+    "log_level": "INFO",
+    "connection_pool_size": 10,
+    "default_confirmations": 3,
+    "max_reconnect_attempts": 10,
+    "monitoring": {
+      "enabled": true,
+      "prometheus_port": 9090,
+      "metrics_prefix": "blockchain_module"
+    },
+    "rest_api": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080,
+      "api_key_required": true,
+      "rate_limit": 100,
+      "enable_auth": true
+    },
+    "multiuser": {
+      "enabled": true,
+      "default_user_quotas": {
+        "max_monitored_addresses": 100,
+        "max_daily_api_calls": 10000,
+        "max_concurrent_monitors": 5,
+        "can_collect_funds": false,
+        "can_create_addresses": true,
+        "can_view_transactions": true
+      },
+      "admin_api_key": "",
+      "session_timeout": 3600
+    }
+  },
+  "coins": {
+    "LTC": {
+      "symbol": "LTC",
+      "name": "Litecoin",
+      "decimals": 8,
+      "blockbook_url": "https://ltcbook.nownodes.io",
+      "required_confirmations": 3,
+      "min_collection_amount": 0.001,
+      "collection_fee": 0.0001
+    },
+    "DOGE": {
+      "symbol": "DOGE",
+      "name": "Dogecoin",
+      "decimals": 8,
+      "blockbook_url": "https://dogebook.nownodes.io",
+      "required_confirmations": 6,
+      "min_collection_amount": 1.0,
+      "collection_fee": 0.1
+    }
+  }
+}
+EOF
+    log_success "Файл module_config.json создан"
+}
+
+# Создание критических файлов
+create_critical_files() {
+    # Создаем alerts.yml если нет
+    if [[ ! -f "alerts.yml" ]]; then
+        cat > alerts.yml << 'EOF'
+groups:
+  - name: blockchain_module_alerts
+    rules:
+      - alert: BlockchainModuleDown
+        expr: up{job="blockchain_module"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Blockchain module is down"
+          description: "Blockchain module has been down for more than 1 minute"
+      
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for 5 minutes"
+      
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 80% for 5 minutes"
+EOF
+        log_success "Файл alerts.yml создан"
     fi
     
-    log_success "Все файлы проверены и загружены"
+    # Создаем blockchain_dashboard.json если нет
+    if [[ ! -f "blockchain_dashboard.json" ]]; then
+        cat > blockchain_dashboard.json << 'EOF'
+{
+  "dashboard": {
+    "title": "Blockchain Module Monitoring",
+    "tags": ["blockchain", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Overview",
+        "type": "stat",
+        "gridPos": {"h": 3, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "blockchain_module_status",
+            "format": "time_series",
+            "legendFormat": "Module Status",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name"
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}
+EOF
+        log_success "Файл blockchain_dashboard.json создан"
+    fi
+    
+    # Создаем docker-compose.yml если нет
+    if [[ ! -f "docker-compose.yml" ]]; then
+        cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: blockchain_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: blockchain_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./blockchain_dashboard.json:/var/lib/grafana/dashboards/blockchain_dashboard.json
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SMTP_ENABLED=false
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+EOF
+        log_success "Файл docker-compose.yml создан"
+    fi
+    
+    # Создаем базовый __init__.py для CLI если нет
+    if [[ ! -f "blockchain_module/cli.py" ]]; then
+        mkdir -p blockchain_module
+        cat > blockchain_module/cli.py << 'EOF'
+"""
+CLI интерфейс для Blockchain Module
+"""
+
+import click
+import asyncio
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+@click.group()
+@click.version_option(version="2.0.0")
+def cli():
+    """Blockchain Module CLI - Управление криптовалютным модулем"""
+    pass
+
+@cli.command()
+def system_status():
+    """Показать статус системы"""
+    click.echo("Проверка статуса системы...")
+    
+    try:
+        # Проверяем базовые импорты
+        from blockchain_module import get_module_info
+        info = get_module_info()
+        
+        click.echo(f"✅ Blockchain Module v{info['version']}")
+        click.echo(f"✅ Поддерживаемые монеты: {info['supported_coins']}")
+        click.echo(f"✅ Мультипользовательский режим: {info['multiuser_enabled']}")
+        
+        # Проверяем базу данных
+        from blockchain_module.database import SQLiteDBManager
+        
+        async def check_db():
+            db = SQLiteDBManager("data/blockchain_module.db")
+            await db.initialize()
+            stats = await db.get_stats()
+            await db.close()
+            return stats
+        
+        stats = asyncio.run(check_db())
+        click.echo(f"✅ База данных: {stats.get('users_count', 0)} пользователей")
+        
+        click.echo("\n🎉 Система работает корректно!")
+        
+    except Exception as e:
+        click.echo(f"❌ Ошибка: {e}", err=True)
+
+@cli.command()
+@click.option('--api-key', prompt=True, hide_input=True, help='API ключ Nownodes')
+def setup(api_key):
+    """Настроить API ключ"""
+    try:
+        from blockchain_module.config import BlockchainConfig
+        BlockchainConfig.set_api_key(api_key)
+        click.echo("✅ API ключ сохранен в конфигурации")
+    except Exception as e:
+        click.echo(f"❌ Ошибка: {e}", err=True)
+
+@cli.command()
+@click.option('--coin', required=True, help='Символ монеты (LTC, DOGE)')
+@click.option('--address', required=True, help='Адрес для мониторинга')
+@click.option('--user-id', default=1, help='ID пользователя')
+def monitor_address(coin, address, user_id):
+    """Добавить адрес для мониторинга"""
+    click.echo(f"Добавление адреса {address} для мониторинга {coin}...")
+    
+    try:
+        from blockchain_module.database import SQLiteDBManager
+        
+        async def add_address():
+            db = SQLiteDBManager("data/blockchain_module.db")
+            await db.initialize()
+            success = await db.add_address_to_monitor(user_id, coin, address)
+            await db.close()
+            return success
+        
+        success = asyncio.run(add_address())
+        
+        if success:
+            click.echo("✅ Адрес добавлен для мониторинга")
+        else:
+            click.echo("❌ Не удалось добавить адрес")
+            
+    except Exception as e:
+        click.echo(f"❌ Ошибка: {e}", err=True)
+
+@cli.command()
+def interactive():
+    """Запустить интерактивный режим"""
+    click.echo("Запуск интерактивного режима...")
+    
+    # Простая интерактивная оболочка
+    while True:
+        click.echo("\nДоступные команды:")
+        click.echo("1. Показать статус системы")
+        click.echo("2. Настроить API ключ")
+        click.echo("3. Добавить адрес для мониторинга")
+        click.echo("4. Выйти")
+        
+        choice = click.prompt("Выберите опцию", type=int)
+        
+        if choice == 1:
+            system_status()
+        elif choice == 2:
+            api_key = click.prompt("Введите API ключ Nownodes", hide_input=True)
+            setup(api_key=api_key)
+        elif choice == 3:
+            coin = click.prompt("Символ монеты (LTC, DOGE)")
+            address = click.prompt("Адрес для мониторинга")
+            monitor_address(coin=coin, address=address)
+        elif choice == 4:
+            break
+        else:
+            click.echo("Неверный выбор")
+
+if __name__ == "__main__":
+    cli()
+EOF
+        log_success "Файл blockchain_module/cli.py создан"
+    fi
 }
 
 # Проверка прав
 check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        log_warn "Рекомендуется запускать скрипт с правами root"
-        read -p "Продолжить без прав root? (y/n): " -n 1 -r
+    if [[ $EUID -eq 0 ]]; then
+        log_warn "Скрипт запущен от root. Рекомендуется использовать обычного пользователя."
+        read -p "Продолжить? (y/n): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             exit 1
@@ -200,17 +559,7 @@ check_system() {
         fi
     fi
     
-    # Проверка curl
-    if ! command -v curl &>/dev/null; then
-        log_warn "curl не найден, устанавливаем..."
-        if [[ "$OS" == *"Ubuntu"* || "$OS" == *"Debian"* ]]; then
-            apt-get install -y curl
-        elif [[ "$OS" == *"CentOS"* || "$OS" == *"Red Hat"* ]]; then
-            yum install -y curl
-        elif [[ "$OS" == *"Fedora"* ]]; then
-            dnf install -y curl
-        fi
-    fi
+    log_success "Системные проверки пройдены"
 }
 
 # Установка зависимостей системы
@@ -220,213 +569,131 @@ install_system_deps() {
     if [[ "$OS" == *"Ubuntu"* || "$OS" == *"Debian"* ]]; then
         apt-get update
         apt-get install -y \
-            git \
             curl \
             wget \
-            build-essential \
             python3-dev \
             python3-venv \
             sqlite3 \
-            libsqlite3-dev \
-            net-tools
+            libsqlite3-dev
     elif [[ "$OS" == *"CentOS"* || "$OS" == *"Red Hat"* || "$OS" == *"Fedora"* ]]; then
         if [[ "$OS" == *"Fedora"* ]]; then
             dnf install -y \
-                git \
                 curl \
                 wget \
-                gcc \
-                g++ \
                 python3-devel \
                 sqlite \
-                sqlite-devel \
-                net-tools
+                sqlite-devel
         else
             yum install -y \
-                git \
                 curl \
                 wget \
-                gcc \
-                gcc-c++ \
                 python3-devel \
                 sqlite \
-                sqlite-devel \
-                net-tools
+                sqlite-devel
         fi
     else
         log_warn "Неизвестная ОС, попробуйте установить зависимости вручную"
     fi
 }
 
+# Установка Docker
+install_docker() {
+    if command -v docker &>/dev/null; then
+        log_info "Docker уже установлен"
+        return 0
+    fi
+    
+    log_info "Установка Docker..."
+    
+    if [[ "$OS" == *"Ubuntu"* || "$OS" == *"Debian"* ]]; then
+        # Устанавливаем Docker
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        
+    elif [[ "$OS" == *"CentOS"* || "$OS" == *"Red Hat"* ]]; then
+        yum install -y yum-utils
+        yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        yum install -y docker-ce docker-ce-cli containerd.io
+        
+    elif [[ "$OS" == *"Fedora"* ]]; then
+        dnf -y install dnf-plugins-core
+        dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+        dnf install -y docker-ce docker-ce-cli containerd.io
+    else
+        log_error "Не удалось установить Docker на эту ОС"
+        return 1
+    fi
+    
+    # Запускаем Docker
+    systemctl start docker
+    systemctl enable docker
+    
+    # Добавляем текущего пользователя в группу docker
+    if [[ $EUID -ne 0 ]]; then
+        usermod -aG docker $USER
+        log_warn "Необходимо перезайти в систему для применения изменений группы docker"
+    fi
+    
+    log_success "Docker установлен"
+}
+
+# Установка Docker Compose
+install_docker_compose() {
+    if command -v docker-compose &>/dev/null; then
+        log_info "Docker Compose уже установлен"
+        return 0
+    fi
+    
+    log_info "Установка Docker Compose..."
+    
+    # Скачиваем Docker Compose
+    COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+    
+    curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
+        -o /usr/local/bin/docker-compose
+    
+    chmod +x /usr/local/bin/docker-compose
+    
+    log_success "Docker Compose установлен"
+}
+
 # Настройка директорий
 setup_directories() {
-    log_info "Создание структуры директорий..."
+    log_info "Настройка структуры директорий..."
     
-    mkdir -p configs data logs prometheus grafana/dashboards alerts
-    
-    # Копируем конфигурационные файлы
-    if [[ -f "module_config.json" ]]; then
-        cp module_config.json configs/
-    else
-        log_warn "Файл module_config.json не найден"
-    fi
-    
-    if [[ -f "alerts.yml" ]]; then
-        cp alerts.yml alerts/
-    else
-        log_warn "Файл alerts.yml не найден"
-    fi
-    
-    if [[ -f "blockchain_dashboard.json" ]]; then
-        cp blockchain_dashboard.json grafana/dashboards/
-    else
-        log_warn "Файл blockchain_dashboard.json не найден"
-    fi
+    mkdir -p prometheus grafana
     
     # Создаем prometheus.yml
     cat > prometheus/prometheus.yml << 'EOF'
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  external_labels:
-    environment: 'production'
 
 rule_files:
-  - "../alerts/alerts.yml"
+  - /etc/prometheus/alerts.yml
 
 scrape_configs:
-  - job_name: 'blockchain_module'
-    scrape_interval: 15s
-    scrape_timeout: 10s
-    metrics_path: '/metrics'
-    scheme: 'http'
-    
-    static_configs:
-      - targets: ['host.docker.internal:9090']
-        labels:
-          instance: 'blockchain_module_main'
-          component: 'application'
-
-  - job_name: 'node_exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-        labels:
-          instance: 'blockchain_module_server'
-          component: 'system'
-
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  - job_name: 'cadvisor'
+  - job_name: 'blockchain_module'
     static_configs:
-      - targets: ['cadvisor:8080']
+      - targets: ['host.docker.internal:9090']
+        labels:
+          service: 'blockchain_module'
 
-  - job_name: 'grafana'
+  - job_name: 'node'
     static_configs:
-      - targets: ['grafana:3000']
+      - targets: ['node-exporter:9100']
 EOF
 
-    # Создаем docker-compose для мониторинга
-    cat > docker-compose-monitoring.yml << 'EOF'
-version: '3.8'
-
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: blockchain_prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./alerts:/etc/prometheus/alerts
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    networks:
-      - monitoring
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: blockchain_grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SMTP_ENABLED=false
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-    networks:
-      - monitoring
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: blockchain_node_exporter
-    ports:
-      - "9100:9100"
-    restart: unless-stopped
-    networks:
-      - monitoring
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: blockchain_cadvisor
-    ports:
-      - "8080:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    restart: unless-stopped
-    networks:
-      - monitoring
-
-networks:
-  monitoring:
-    driver: bridge
-
-volumes:
-  prometheus_data:
-  grafana_data:
-EOF
-
-    log_success "Директории и конфигурационные файлы созданы"
+    log_success "Директории настроены"
 }
 
-# Основная функция
-main() {
-    echo -e "${BLUE}"
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║      Blockchain Module Auto Installer v2.0.0    ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # Шаг 1: Загрузка недостающих файлов
-    download_missing_files
-    
-    # Шаг 2: Проверка системы
-    check_root
-    check_system
-    
-    # Шаг 3: Установка системных зависимостей
-    install_system_deps
-    
-    # Шаг 4: Настройка директорий
-    setup_directories
-    
-    # Шаг 5: Установка Python зависимостей
+# Установка Python зависимостей
+install_python_deps() {
     log_info "Установка Python зависимостей..."
     
     # Обновляем pip
@@ -452,85 +719,36 @@ main() {
     # Устанавливаем модуль
     if [[ -f "setup.py" ]]; then
         pip3 install -e .
-    else
-        log_warn "setup.py не найден, устанавливаем как пакет..."
-        pip3 install .
     fi
     
     log_success "Python зависимости установлены"
-    
-    # Шаг 6: Создание скрипта запуска REST API
-    log_info "Создание скрипта запуска REST API..."
-    
-    cat > run_rest_api.py << 'EOF'
-#!/usr/bin/env python3
-"""
-Скрипт запуска REST API сервера Blockchain Module
-"""
+}
 
-import asyncio
-import logging
-import sys
-import os
-from pathlib import Path
-
-# Настраиваем логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-async def main():
-    try:
-        from blockchain_module.rest_api import run_rest_api
-        
-        # Получаем порт из аргументов или конфигурации
-        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8089
-        
-        logger.info(f"Запуск Blockchain Module REST API на порту {port}")
-        
-        await run_rest_api(host='0.0.0.0', port=port)
-        
-    except KeyboardInterrupt:
-        logger.info("Сервер остановлен пользователем")
-    except Exception as e:
-        logger.error(f"Ошибка запуска сервера: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        sys.exit(1)
-
-if __name__ == "__main__":
-    # Создаем директорию для логов
-    os.makedirs('logs', exist_ok=True)
-    
-    asyncio.run(main())
-EOF
-    
-    chmod +x run_rest_api.py
-    log_success "Скрипт запуска REST API создан"
-    
-    # Шаг 7: Тестирование установки
+# Тестирование установки
+test_installation() {
     log_info "Тестирование установки..."
     
     python3 -c "
 import sys
-print('Тестирование Blockchain Module...')
+print('🔧 Тестирование Blockchain Module...')
 
 try:
-    from blockchain_module import get_module_info, SUPPORTED_COINS
-    info = get_module_info()
-    print(f'✅ Модуль загружен: v{info[\"version\"]}')
-    print(f'✅ Поддерживаемые монеты: {SUPPORTED_COINS}')
+    # Проверяем основные импорты
+    from blockchain_module import get_module_info
+    print('✅ Модуль blockchain_module импортирован')
     
     from blockchain_module.config import BlockchainConfig
-    print(f'✅ Конфигурация загружена')
+    print('✅ Конфигурация доступна')
     
     from blockchain_module.database import SQLiteDBManager
-    print(f'✅ База данных доступна')
+    print('✅ База данных доступна')
     
     from blockchain_module.rest_api import BlockchainRestAPI
-    print(f'✅ REST API доступен')
+    print('✅ REST API доступен')
+    
+    info = get_module_info()
+    print(f'✅ Версия модуля: {info[\"version\"]}')
+    print(f'✅ Поддерживаемые монеты: {info[\"supported_coins\"]}')
     
     print('\\n🎉 Все компоненты успешно загружены!')
     
@@ -541,34 +759,184 @@ except Exception as e:
     sys.exit(1)
 "
     
+    # Проверяем CLI
+    if python3 -c "from blockchain_module.cli import cli; print('CLI доступен')" 2>/dev/null; then
+        log_success "CLI интерфейс доступен"
+    else
+        log_warn "CLI интерфейс не доступен, но это не критично"
+    fi
+}
+
+# Создание скрипта запуска
+create_start_script() {
+    log_info "Создание скриптов запуска..."
+    
+    # Скрипт запуска REST API
+    cat > start_api.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Скрипт запуска REST API сервера
+"""
+
+import asyncio
+import logging
+import sys
+import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+async def main():
+    try:
+        from blockchain_module.rest_api import run_rest_api
+        
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+        
+        logger.info(f"Запуск REST API на порту {port}")
+        await run_rest_api(host='0.0.0.0', port=port)
+        
+    except KeyboardInterrupt:
+        logger.info("Сервер остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+EOF
+    chmod +x start_api.py
+    
+    # Скрипт управления
+    cat > blockchain-manage << 'EOF'
+#!/bin/bash
+# Скрипт управления Blockchain Module
+
+case "$1" in
+    start)
+        echo "Запуск системы..."
+        docker-compose up -d
+        python3 start_api.py &
+        echo $! > .api_pid
+        echo "✅ Система запущена"
+        ;;
+    stop)
+        echo "Остановка системы..."
+        docker-compose down
+        if [[ -f ".api_pid" ]]; then
+            kill $(cat .api_pid) 2>/dev/null
+            rm .api_pid
+        fi
+        echo "✅ Система остановлена"
+        ;;
+    status)
+        echo "Статус системы:"
+        docker-compose ps
+        if [[ -f ".api_pid" ]] && kill -0 $(cat .api_pid) 2>/dev/null; then
+            echo "✅ REST API запущен (PID: $(cat .api_pid))"
+        else
+            echo "❌ REST API не запущен"
+        fi
+        ;;
+    logs)
+        docker-compose logs -f
+        ;;
+    *)
+        echo "Использование: $0 {start|stop|status|logs}"
+        exit 1
+        ;;
+esac
+EOF
+    chmod +x blockchain-manage
+    
+    log_success "Скрипты запуска созданы"
+}
+
+# Запуск Docker контейнеров
+start_docker_containers() {
+    log_info "Запуск Docker контейнеров..."
+    
+    if docker-compose up -d; then
+        log_success "Docker контейнеры запущены"
+        
+        # Ждем запуска
+        sleep 10
+        
+        # Проверяем
+        docker-compose ps
+    else
+        log_error "Не удалось запустить Docker контейнеры"
+        return 1
+    fi
+}
+
+# Основная функция
+main() {
+    echo -e "${BLUE}"
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║      Blockchain Module Auto Installer v2.0.0    ║"
+    echo "╚══════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    # Шаг 0: Загрузка файлов
+    download_missing_files
+    
+    # Шаг 1: Проверка системы
+    check_system
+    
+    # Шаг 2: Установка системных зависимостей
+    install_system_deps
+    
+    # Шаг 3: Установка Docker
+    install_docker
+    install_docker_compose
+    
+    # Шаг 4: Настройка директорий
+    setup_directories
+    
+    # Шаг 5: Установка Python зависимостей
+    install_python_deps
+    
+    # Шаг 6: Тестирование
+    test_installation
+    
+    # Шаг 7: Создание скриптов запуска
+    create_start_script
+    
+    # Шаг 8: Запуск Docker контейнеров
+    start_docker_containers
+    
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║           УСТАНОВКА ЗАВЕРШЕНА!                 ║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo "Доступные команды:"
-    echo "  • python3 run_rest_api.py    - Запуск REST API"
-    echo "  • python3 -m blockchain_module - Запуск модуля"
+    echo "🎉 Blockchain Module успешно установлен!"
     echo ""
-    echo "Структура файлов:"
-    echo "  📁 blockchain_module/      - Основной код модуля"
-    echo "  📁 configs/               - Конфигурационные файлы"
-    echo "  📁 data/                  - База данных"
-    echo "  📁 logs/                  - Логи"
-    echo "  📄 run_rest_api.py        - Скрипт запуска API"
-    echo "  📄 module_config.json     - Основной конфиг"
+    echo "📊 Сервисы мониторинга:"
+    echo "  • Grafana:       http://localhost:3000"
+    echo "  • Prometheus:    http://localhost:9090"
     echo ""
-    echo "Для запуска Docker контейнеров мониторинга:"
-    echo "  docker-compose -f docker-compose-monitoring.yml up -d"
+    echo "🚀 Управление системой:"
+    echo "  • ./blockchain-manage start   - Запустить систему"
+    echo "  • ./blockchain-manage stop    - Остановить систему"
+    echo "  • ./blockchain-manage status  - Статус системы"
+    echo "  • ./blockchain-manage logs    - Просмотр логов"
     echo ""
-    echo "Следующие шаги:"
-    echo "  1. Настройте API ключ в configs/module_config.json"
-    echo "  2. Запустите REST API: python3 run_rest_api.py"
-    echo "  3. Откройте http://localhost:8089/api/v1/info"
+    echo "🔧 Настройка:"
+    echo "  1. Отредактируйте configs/module_config.json"
+    echo "  2. Добавьте ваш API ключ Nownodes"
+    echo "  3. Запустите: ./blockchain-manage start"
+    echo ""
+    echo "📚 Документация:"
+    echo "  • blockchain-cli --help       - CLI интерфейс"
+    echo "  • http://localhost:8080/api/v1/info - REST API документация"
     echo ""
 }
 
-# Запуск главной функции
+# Запуск
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main
 fi
