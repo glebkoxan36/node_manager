@@ -1,5 +1,5 @@
 #!/bin/bash
-# Полный скрипт установки Blockchain Module
+# Полный скрипт установки Blockchain Module - ИСПРАВЛЕННЫЙ
 
 set -e
 
@@ -30,34 +30,43 @@ log_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
-# Текущая директория
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR"
+# Текущая директория - ИСПРАВЛЕНО
+PROJECT_DIR="$(pwd)"
 VENV_DIR="$PROJECT_DIR/venv"
 
-# Создание виртуального окружения
+# GitHub репозиторий
+GITHUB_REPO="https://github.com/glebkoxan36/node_manager"
+GITHUB_RAW="https://raw.githubusercontent.com/glebkoxan36/node_manager/main"
+
+# Создание виртуального окружения - ИСПРАВЛЕНО
 create_venv() {
     log_info "Создание виртуального окружения..."
     
     if [[ -d "$VENV_DIR" ]]; then
         log_info "Виртуальное окружение уже существует"
     else
-        python3 -m venv "$VENV_DIR"
+        python3 -m venv "$VENV_DIR" || {
+            log_error "Не удалось создать виртуальное окружение"
+            log_info "Попробуем установить python3-venv..."
+            apt-get update && apt-get install -y python3-venv
+            python3 -m venv "$VENV_DIR"
+        }
         log_success "Виртуальное окружение создано в $VENV_DIR"
     fi
     
-    # Активируем venv
-    source "$VENV_DIR/bin/activate"
-    
-    # Обновляем pip
-    pip install --upgrade pip
-    
-    log_success "Виртуальное окружение активировано"
+    log_success "Виртуальное окружение готово"
 }
 
-# GitHub репозиторий
-GITHUB_REPO="https://github.com/glebkoxan36/node_manager"
-GITHUB_RAW="https://raw.githubusercontent.com/glebkoxan36/node_manager/main"
+# Активация виртуального окружения (используется в функциях)
+activate_venv() {
+    if [[ -f "$VENV_DIR/bin/activate" ]]; then
+        source "$VENV_DIR/bin/activate"
+        log_info "Виртуальное окружение активировано"
+    else
+        log_error "Не удалось активировать виртуальное окружение"
+        return 1
+    fi
+}
 
 # Проверка и загрузка файлов
 download_missing_files() {
@@ -657,46 +666,48 @@ EOF
     log_success "Директории настроены"
 }
 
-# Установка Python зависимостей в виртуальном окружении
+# Установка Python зависимостей в виртуальном окружении - ИСПРАВЛЕНО
 install_python_deps() {
     log_info "Установка Python зависимостей в виртуальном окружении..."
     
     # Активируем venv
-    source "$VENV_DIR/bin/activate"
-    
-    # Устанавливаем зависимости
-    if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt
+    if activate_venv; then
+        # Устанавливаем зависимости
+        if [[ -f "requirements.txt" ]]; then
+            pip install -r requirements.txt
+        else
+            pip install \
+                aiohttp>=3.8.0 \
+                aiosqlite>=0.19.0 \
+                prometheus-client>=0.17.0 \
+                aiohttp-cors>=0.7.0 \
+                click>=8.1.0 \
+                questionary>=2.0.0 \
+                rich>=13.0.0 \
+                psutil>=5.9.0 \
+                python-dotenv>=1.0.0 \
+                pyyaml>=6.0
+        fi
+        
+        # Устанавливаем модуль в development mode
+        if [[ -f "setup.py" ]]; then
+            pip install -e .
+        fi
+        
+        log_success "Python зависимости установлены в виртуальном окружении"
     else
-        pip install \
-            aiohttp>=3.8.0 \
-            aiosqlite>=0.19.0 \
-            prometheus-client>=0.17.0 \
-            aiohttp-cors>=0.7.0 \
-            click>=8.1.0 \
-            questionary>=2.0.0 \
-            rich>=13.0.0 \
-            psutil>=5.9.0 \
-            python-dotenv>=1.0.0 \
-            pyyaml>=6.0
+        log_error "Не удалось установить зависимости - виртуальное окружение не активировано"
+        return 1
     fi
-    
-    # Устанавливаем модуль в development mode
-    if [[ -f "setup.py" ]]; then
-        pip install -e .
-    fi
-    
-    log_success "Python зависимости установлены в виртуальном окружении"
 }
 
-# Тестирование установки
+# Тестирование установки - ИСПРАВЛЕНО
 test_installation() {
     log_info "Тестирование установки..."
     
-    # Активируем venv
-    source "$VENV_DIR/bin/activate"
-    
-    python3 -c "
+    # Активируем venv для тестирования
+    if activate_venv; then
+        python3 -c "
 import sys
 print('🔧 Тестирование Blockchain Module...')
 
@@ -726,12 +737,15 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 "
-    
-    # Проверяем CLI
-    if python3 -c "from blockchain_module.cli import cli; print('✅ CLI интерфейс доступен')" 2>/dev/null; then
-        log_success "CLI интерфейс доступен"
+        
+        # Проверяем CLI
+        if python3 -c "from blockchain_module.cli import cli; print('✅ CLI интерфейс доступен')" 2>/dev/null; then
+            log_success "CLI интерфейс доступен"
+        else
+            log_warn "CLI интерфейс не доступен, но это не критично"
+        fi
     else
-        log_warn "CLI интерфейс не доступен, но это не критично"
+        log_error "Не удалось протестировать установку - виртуальное окружение не активировано"
     fi
 }
 
@@ -1071,11 +1085,8 @@ main() {
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     
-    # Создаем директорию проекта если нужно
-    if [[ "$SCRIPT_DIR" != "$PROJECT_DIR" ]]; then
-        mkdir -p "$PROJECT_DIR"
-        cd "$PROJECT_DIR"
-    fi
+    # Переходим в директорию проекта
+    cd "$PROJECT_DIR"
     
     # Шаг 0: Загрузка файлов
     download_missing_files
