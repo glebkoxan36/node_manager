@@ -30,6 +30,31 @@ log_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+# Текущая директория
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+VENV_DIR="$PROJECT_DIR/venv"
+
+# Создание виртуального окружения
+create_venv() {
+    log_info "Создание виртуального окружения..."
+    
+    if [[ -d "$VENV_DIR" ]]; then
+        log_info "Виртуальное окружение уже существует"
+    else
+        python3 -m venv "$VENV_DIR"
+        log_success "Виртуальное окружение создано в $VENV_DIR"
+    fi
+    
+    # Активируем venv
+    source "$VENV_DIR/bin/activate"
+    
+    # Обновляем pip
+    pip install --upgrade pip
+    
+    log_success "Виртуальное окружение активировано"
+}
+
 # GitHub репозиторий
 GITHUB_REPO="https://github.com/glebkoxan36/node_manager"
 GITHUB_RAW="https://raw.githubusercontent.com/glebkoxan36/node_manager/main"
@@ -81,9 +106,6 @@ download_missing_files() {
                     "requirements.txt")
                         create_requirements_txt
                         ;;
-                    "configs/module_config.json")
-                        create_module_config
-                        ;;
                     *)
                         # Для остальных файлов создаем пустые или базовые
                         mkdir -p "$(dirname "$local_file")"
@@ -96,8 +118,8 @@ download_missing_files() {
         fi
     done
     
-    # Создаем критические файлы если их нет
-    create_critical_files
+    # Создаем конфигурационные файлы если их нет
+    create_config_files
     
     log_success "Все файлы проверены"
 }
@@ -175,9 +197,12 @@ EOF
     log_success "Файл requirements.txt создан"
 }
 
-# Создание module_config.json
-create_module_config() {
-    cat > configs/module_config.json << 'EOF'
+# Создание конфигурационных файлов
+create_config_files() {
+    # Создаем module_config.json если нет
+    if [[ ! -f "configs/module_config.json" ]]; then
+        mkdir -p configs
+        cat > configs/module_config.json << 'EOF'
 {
   "module_settings": {
     "api_key": "YOUR_NOWNODES_API_KEY_HERE",
@@ -234,11 +259,9 @@ create_module_config() {
   }
 }
 EOF
-    log_success "Файл module_config.json создан"
-}
-
-# Создание критических файлов
-create_critical_files() {
+        log_success "Файл configs/module_config.json создан"
+    fi
+    
     # Создаем alerts.yml если нет
     if [[ ! -f "alerts.yml" ]]; then
         cat > alerts.yml << 'EOF'
@@ -375,7 +398,7 @@ EOF
         log_success "Файл docker-compose.yml создан"
     fi
     
-    # Создаем базовый __init__.py для CLI если нет
+    # Создаем CLI если нет
     if [[ ! -f "blockchain_module/cli.py" ]]; then
         mkdir -p blockchain_module
         cat > blockchain_module/cli.py << 'EOF'
@@ -386,7 +409,11 @@ CLI интерфейс для Blockchain Module
 import click
 import asyncio
 import logging
-from typing import Optional
+import sys
+import os
+
+# Добавляем путь к модулю
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +429,6 @@ def system_status():
     click.echo("Проверка статуса системы...")
     
     try:
-        # Проверяем базовые импорты
         from blockchain_module import get_module_info
         info = get_module_info()
         
@@ -429,89 +455,43 @@ def system_status():
         click.echo(f"❌ Ошибка: {e}", err=True)
 
 @cli.command()
-@click.option('--api-key', prompt=True, hide_input=True, help='API ключ Nownodes')
-def setup(api_key):
-    """Настроить API ключ"""
+def info():
+    """Показать информацию о модуле"""
     try:
-        from blockchain_module.config import BlockchainConfig
-        BlockchainConfig.set_api_key(api_key)
-        click.echo("✅ API ключ сохранен в конфигурации")
+        from blockchain_module import get_module_info
+        import json
+        
+        info = get_module_info()
+        click.echo(json.dumps(info, indent=2, ensure_ascii=False))
+        
     except Exception as e:
-        click.echo(f"❌ Ошибка: {e}", err=True)
-
-@cli.command()
-@click.option('--coin', required=True, help='Символ монеты (LTC, DOGE)')
-@click.option('--address', required=True, help='Адрес для мониторинга')
-@click.option('--user-id', default=1, help='ID пользователя')
-def monitor_address(coin, address, user_id):
-    """Добавить адрес для мониторинга"""
-    click.echo(f"Добавление адреса {address} для мониторинга {coin}...")
-    
-    try:
-        from blockchain_module.database import SQLiteDBManager
-        
-        async def add_address():
-            db = SQLiteDBManager("data/blockchain_module.db")
-            await db.initialize()
-            success = await db.add_address_to_monitor(user_id, coin, address)
-            await db.close()
-            return success
-        
-        success = asyncio.run(add_address())
-        
-        if success:
-            click.echo("✅ Адрес добавлен для мониторинга")
-        else:
-            click.echo("❌ Не удалось добавить адрес")
-            
-    except Exception as e:
-        click.echo(f"❌ Ошибка: {e}", err=True)
+        click.echo(f"Ошибка: {e}", err=True)
 
 @cli.command()
 def interactive():
     """Запустить интерактивный режим"""
-    click.echo("Запуск интерактивного режима...")
+    click.echo("Интерактивный режим Blockchain Module")
+    click.echo("Доступные команды:")
+    click.echo("  status - Показать статус системы")
+    click.echo("  info   - Показать информацию о модуле")
+    click.echo("  exit   - Выйти")
     
-    # Простая интерактивная оболочка
     while True:
-        click.echo("\nДоступные команды:")
-        click.echo("1. Показать статус системы")
-        click.echo("2. Настроить API ключ")
-        click.echo("3. Добавить адрес для мониторинга")
-        click.echo("4. Выйти")
+        command = click.prompt("blockchain> ", type=str)
         
-        choice = click.prompt("Выберите опцию", type=int)
-        
-        if choice == 1:
+        if command == "status":
             system_status()
-        elif choice == 2:
-            api_key = click.prompt("Введите API ключ Nownodes", hide_input=True)
-            setup(api_key=api_key)
-        elif choice == 3:
-            coin = click.prompt("Символ монеты (LTC, DOGE)")
-            address = click.prompt("Адрес для мониторинга")
-            monitor_address(coin=coin, address=address)
-        elif choice == 4:
+        elif command == "info":
+            info()
+        elif command == "exit":
             break
         else:
-            click.echo("Неверный выбор")
+            click.echo(f"Неизвестная команда: {command}")
 
 if __name__ == "__main__":
     cli()
 EOF
         log_success "Файл blockchain_module/cli.py создан"
-    fi
-}
-
-# Проверка прав
-check_root() {
-    if [[ $EUID -eq 0 ]]; then
-        log_warn "Скрипт запущен от root. Рекомендуется использовать обычного пользователя."
-        read -p "Продолжить? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
     fi
 }
 
@@ -544,25 +524,17 @@ check_system() {
         exit 1
     fi
     
-    # Проверка pip
-    if ! command -v pip3 &>/dev/null; then
-        log_warn "pip3 не найден, устанавливаем..."
-        if [[ "$OS" == *"Ubuntu"* || "$OS" == *"Debian"* ]]; then
-            apt-get update && apt-get install -y python3-pip
-        elif [[ "$OS" == *"CentOS"* || "$OS" == *"Red Hat"* ]]; then
-            yum install -y python3-pip
-        elif [[ "$OS" == *"Fedora"* ]]; then
-            dnf install -y python3-pip
-        else
-            log_error "Не удалось установить pip3"
-            exit 1
-        fi
+    # Проверка venv
+    if ! python3 -c "import venv" 2>/dev/null; then
+        log_warn "Модуль venv не установлен, устанавливаем..."
+        apt-get update
+        apt-get install -y python3-venv
     fi
     
     log_success "Системные проверки пройдены"
 }
 
-# Установка зависимостей системы
+# Установка системных зависимостей
 install_system_deps() {
     log_info "Установка системных зависимостей..."
     
@@ -629,12 +601,6 @@ install_docker() {
     systemctl start docker
     systemctl enable docker
     
-    # Добавляем текущего пользователя в группу docker
-    if [[ $EUID -ne 0 ]]; then
-        usermod -aG docker $USER
-        log_warn "Необходимо перезайти в систему для применения изменений группы docker"
-    fi
-    
     log_success "Docker установлен"
 }
 
@@ -655,6 +621,9 @@ install_docker_compose() {
     
     chmod +x /usr/local/bin/docker-compose
     
+    # Создаем symlink для docker compose plugin
+    ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+    
     log_success "Docker Compose установлен"
 }
 
@@ -662,7 +631,7 @@ install_docker_compose() {
 setup_directories() {
     log_info "Настройка структуры директорий..."
     
-    mkdir -p prometheus grafana
+    mkdir -p prometheus grafana data logs
     
     # Создаем prometheus.yml
     cat > prometheus/prometheus.yml << 'EOF'
@@ -683,27 +652,23 @@ scrape_configs:
       - targets: ['host.docker.internal:9090']
         labels:
           service: 'blockchain_module'
-
-  - job_name: 'node'
-    static_configs:
-      - targets: ['node-exporter:9100']
 EOF
 
     log_success "Директории настроены"
 }
 
-# Установка Python зависимостей
+# Установка Python зависимостей в виртуальном окружении
 install_python_deps() {
-    log_info "Установка Python зависимостей..."
+    log_info "Установка Python зависимостей в виртуальном окружении..."
     
-    # Обновляем pip
-    pip3 install --upgrade pip
+    # Активируем venv
+    source "$VENV_DIR/bin/activate"
     
     # Устанавливаем зависимости
     if [[ -f "requirements.txt" ]]; then
-        pip3 install -r requirements.txt
+        pip install -r requirements.txt
     else
-        pip3 install \
+        pip install \
             aiohttp>=3.8.0 \
             aiosqlite>=0.19.0 \
             prometheus-client>=0.17.0 \
@@ -716,17 +681,20 @@ install_python_deps() {
             pyyaml>=6.0
     fi
     
-    # Устанавливаем модуль
+    # Устанавливаем модуль в development mode
     if [[ -f "setup.py" ]]; then
-        pip3 install -e .
+        pip install -e .
     fi
     
-    log_success "Python зависимости установлены"
+    log_success "Python зависимости установлены в виртуальном окружении"
 }
 
 # Тестирование установки
 test_installation() {
     log_info "Тестирование установки..."
+    
+    # Активируем venv
+    source "$VENV_DIR/bin/activate"
     
     python3 -c "
 import sys
@@ -760,7 +728,7 @@ except Exception as e:
 "
     
     # Проверяем CLI
-    if python3 -c "from blockchain_module.cli import cli; print('CLI доступен')" 2>/dev/null; then
+    if python3 -c "from blockchain_module.cli import cli; print('✅ CLI интерфейс доступен')" 2>/dev/null; then
         log_success "CLI интерфейс доступен"
     else
         log_warn "CLI интерфейс не доступен, но это не критично"
@@ -772,17 +740,39 @@ create_start_script() {
     log_info "Создание скриптов запуска..."
     
     # Скрипт запуска REST API
-    cat > start_api.py << 'EOF'
-#!/usr/bin/env python3
-"""
-Скрипт запуска REST API сервера
-"""
+    cat > start_api.sh << 'EOF'
+#!/bin/bash
+# Скрипт запуска REST API сервера
 
+cd "$(dirname "$0")"
+
+# Активируем виртуальное окружение
+if [[ -d "venv" ]]; then
+    source venv/bin/activate
+else
+    echo "Ошибка: Виртуальное окружение не найдено"
+    exit 1
+fi
+
+# Проверяем Python
+python3 -c "import sys; sys.exit(0) if sys.version_info >= (3,7) else sys.exit(1)"
+if [[ $? -ne 0 ]]; then
+    echo "Требуется Python 3.7 или выше"
+    exit 1
+fi
+
+echo "Запуск Blockchain Module REST API..."
+echo "Виртуальное окружение: $(which python)"
+echo "Версия Python: $(python --version)"
+
+# Запускаем API
+python3 -c "
 import asyncio
 import logging
 import sys
 import os
 
+# Настраиваем логирование
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -793,58 +783,243 @@ async def main():
     try:
         from blockchain_module.rest_api import run_rest_api
         
-        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+        # Получаем порт из аргументов или используем 8089
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8089
         
-        logger.info(f"Запуск REST API на порту {port}")
+        logger.info(f'🚀 Запуск Blockchain Module REST API на порту {port}')
+        logger.info(f'📁 Рабочая директория: {os.getcwd()}')
+        
         await run_rest_api(host='0.0.0.0', port=port)
         
     except KeyboardInterrupt:
-        logger.info("Сервер остановлен")
+        logger.info('Сервер остановлен пользователем')
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f'Ошибка запуска сервера: {e}')
+        import traceback
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
+"
 EOF
-    chmod +x start_api.py
+    chmod +x start_api.sh
     
     # Скрипт управления
     cat > blockchain-manage << 'EOF'
 #!/bin/bash
 # Скрипт управления Blockchain Module
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Цвета
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+show_help() {
+    echo "Использование: $0 {start|stop|status|logs|test|cli|help}"
+    echo ""
+    echo "Команды:"
+    echo "  start    - Запустить всю систему (Docker + REST API)"
+    echo "  stop     - Остановить всю систему"
+    echo "  status   - Показать статус системы"
+    echo "  logs     - Показать логи Docker"
+    echo "  test     - Запустить тесты"
+    echo "  cli      - Запустить CLI интерфейс"
+    echo "  help     - Показать эту справку"
+}
+
+start_system() {
+    echo -e "${GREEN}[+] Запуск системы...${NC}"
+    
+    # Запускаем Docker контейнеры
+    if [[ -f "docker-compose.yml" ]]; then
+        docker-compose up -d
+        echo "Docker контейнеры запущены"
+    else
+        echo -e "${YELLOW}[!] docker-compose.yml не найден${NC}"
+    fi
+    
+    # Запускаем REST API в фоне
+    if [[ -f "start_api.sh" ]]; then
+        ./start_api.sh > logs/api.log 2>&1 &
+        API_PID=$!
+        echo $API_PID > .api_pid
+        echo "REST API запущен (PID: $API_PID)"
+    else
+        echo -e "${YELLOW}[!] start_api.sh не найден${NC}"
+    fi
+    
+    echo -e "${GREEN}[+] Система запущена${NC}"
+    echo -e "${BLUE}[i] REST API: http://localhost:8089${NC}"
+    echo -e "${BLUE}[i] Grafana: http://localhost:3000${NC}"
+    echo -e "${BLUE}[i] Prometheus: http://localhost:9090${NC}"
+}
+
+stop_system() {
+    echo -e "${YELLOW}[-] Остановка системы...${NC}"
+    
+    # Останавливаем Docker контейнеры
+    if [[ -f "docker-compose.yml" ]]; then
+        docker-compose down
+        echo "Docker контейнеры остановлены"
+    fi
+    
+    # Останавливаем REST API
+    if [[ -f ".api_pid" ]]; then
+        API_PID=$(cat .api_pid)
+        if kill -0 $API_PID 2>/dev/null; then
+            kill $API_PID
+            echo "REST API остановлен (PID: $API_PID)"
+        fi
+        rm -f .api_pid
+    fi
+    
+    echo -e "${GREEN}[+] Система остановлена${NC}"
+}
+
+show_status() {
+    echo -e "${BLUE}[*] Статус системы:${NC}"
+    echo ""
+    
+    # Docker контейнеры
+    if command -v docker-compose >/dev/null && [[ -f "docker-compose.yml" ]]; then
+        echo "Docker контейнеры:"
+        docker-compose ps
+        echo ""
+    else
+        echo "Docker Compose не доступен"
+    fi
+    
+    # REST API
+    if [[ -f ".api_pid" ]]; then
+        API_PID=$(cat .api_pid)
+        if kill -0 $API_PID 2>/dev/null; then
+            echo -e "REST API: ${GREEN}запущен${NC} (PID: $API_PID)"
+            
+            # Проверяем доступность
+            if curl -s http://localhost:8089/api/v1/info >/dev/null 2>&1; then
+                echo -e "  Доступность: ${GREEN}да${NC}"
+            else
+                echo -e "  Доступность: ${RED}нет${NC}"
+            fi
+        else
+            echo -e "REST API: ${RED}не запущен${NC}"
+        fi
+    else
+        echo -e "REST API: ${RED}не запущен${NC}"
+    fi
+    
+    # Виртуальное окружение
+    if [[ -d "venv" ]]; then
+        echo -e "Виртуальное окружение: ${GREEN}найдено${NC}"
+    else
+        echo -e "Виртуальное окружение: ${RED}не найдено${NC}"
+    fi
+}
+
+show_logs() {
+    echo -e "${BLUE}[*] Логи системы:${NC}"
+    
+    if [[ "$1" == "api" ]]; then
+        tail -f logs/api.log 2>/dev/null || echo "Файл логов не найден"
+    elif [[ "$1" == "docker" ]] && [[ -f "docker-compose.yml" ]]; then
+        docker-compose logs -f
+    else
+        echo "Использование: $0 logs {api|docker}"
+    fi
+}
+
+run_tests() {
+    echo -e "${BLUE}[*] Запуск тестов...${NC}"
+    
+    # Активируем venv
+    if [[ -d "venv" ]]; then
+        source venv/bin/activate
+    fi
+    
+    python3 -c "
+import sys
+print('Тестирование Blockchain Module...')
+
+try:
+    from blockchain_module import get_module_info
+    info = get_module_info()
+    print(f'✅ Модуль: v{info[\"version\"]}')
+    
+    # Проверка REST API
+    import aiohttp
+    import asyncio
+    
+    async def test_api():
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get('http://localhost:8089/api/v1/info', timeout=5) as resp:
+                    if resp.status == 200:
+                        print('✅ REST API доступен')
+                    else:
+                        print('❌ REST API не отвечает')
+        except:
+            print('❌ REST API недоступен')
+    
+    asyncio.run(test_api())
+    
+    print('\\n✅ Тесты пройдены успешно!')
+    
+except Exception as e:
+    print(f'❌ Ошибка: {e}')
+    sys.exit(1)
+"
+}
+
+run_cli() {
+    # Активируем venv
+    if [[ -d "venv" ]]; then
+        source venv/bin/activate
+    fi
+    
+    if python3 -c "from blockchain_module.cli import cli" 2>/dev/null; then
+        python3 -m blockchain_module.cli "${@:2}"
+    else
+        echo "CLI не доступен"
+        exit 1
+    fi
+}
+
 case "$1" in
     start)
-        echo "Запуск системы..."
-        docker-compose up -d
-        python3 start_api.py &
-        echo $! > .api_pid
-        echo "✅ Система запущена"
+        start_system
         ;;
     stop)
-        echo "Остановка системы..."
-        docker-compose down
-        if [[ -f ".api_pid" ]]; then
-            kill $(cat .api_pid) 2>/dev/null
-            rm .api_pid
-        fi
-        echo "✅ Система остановлена"
+        stop_system
+        ;;
+    restart)
+        stop_system
+        sleep 2
+        start_system
         ;;
     status)
-        echo "Статус системы:"
-        docker-compose ps
-        if [[ -f ".api_pid" ]] && kill -0 $(cat .api_pid) 2>/dev/null; then
-            echo "✅ REST API запущен (PID: $(cat .api_pid))"
-        else
-            echo "❌ REST API не запущен"
-        fi
+        show_status
         ;;
     logs)
-        docker-compose logs -f
+        show_logs "$2"
+        ;;
+    test)
+        run_tests
+        ;;
+    cli)
+        run_cli "$@"
+        ;;
+    help|--help|-h)
+        show_help
         ;;
     *)
-        echo "Использование: $0 {start|stop|status|logs}"
+        echo "Неизвестная команда: $1"
+        show_help
         exit 1
         ;;
 esac
@@ -854,22 +1029,38 @@ EOF
     log_success "Скрипты запуска созданы"
 }
 
-# Запуск Docker контейнеров
-start_docker_containers() {
-    log_info "Запуск Docker контейнеров..."
+# Создание activate.sh для активации venv
+create_activate_script() {
+    log_info "Создание скрипта активации..."
     
-    if docker-compose up -d; then
-        log_success "Docker контейнеры запущены"
-        
-        # Ждем запуска
-        sleep 10
-        
-        # Проверяем
-        docker-compose ps
-    else
-        log_error "Не удалось запустить Docker контейнеры"
-        return 1
-    fi
+    cat > activate.sh << 'EOF'
+#!/bin/bash
+# Скрипт активации виртуального окружения Blockchain Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/venv"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+    echo "Ошибка: Виртуальное окружение не найдено в $VENV_DIR"
+    echo "Запустите установку: ./install.sh"
+    exit 1
+fi
+
+echo "Активация виртуального окружения Blockchain Module..."
+source "$VENV_DIR/bin/activate"
+
+echo ""
+echo "🎉 Виртуальное окружение активировано!"
+echo "Доступные команды:"
+echo "  • python -m blockchain_module.cli - CLI интерфейс"
+echo "  • ./start_api.sh                 - Запуск REST API"
+echo "  • ./blockchain-manage            - Управление системой"
+echo ""
+echo "Для деактивации выполните: deactivate"
+EOF
+    chmod +x activate.sh
+    
+    log_success "Скрипт активации создан"
 }
 
 # Основная функция
@@ -880,18 +1071,29 @@ main() {
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     
+    # Создаем директорию проекта если нужно
+    if [[ "$SCRIPT_DIR" != "$PROJECT_DIR" ]]; then
+        mkdir -p "$PROJECT_DIR"
+        cd "$PROJECT_DIR"
+    fi
+    
     # Шаг 0: Загрузка файлов
     download_missing_files
     
     # Шаг 1: Проверка системы
     check_system
     
-    # Шаг 2: Установка системных зависимостей
-    install_system_deps
+    # Шаг 2: Установка системных зависимостей (только если root)
+    if [[ $EUID -eq 0 ]]; then
+        install_system_deps
+        install_docker
+        install_docker_compose
+    else
+        log_warn "Скрипт запущен без прав root. Проверьте установку Docker вручную."
+    fi
     
-    # Шаг 3: Установка Docker
-    install_docker
-    install_docker_compose
+    # Шаг 3: Создание виртуального окружения
+    create_venv
     
     # Шаг 4: Настройка директорий
     setup_directories
@@ -904,9 +1106,7 @@ main() {
     
     # Шаг 7: Создание скриптов запуска
     create_start_script
-    
-    # Шаг 8: Запуск Docker контейнеров
-    start_docker_containers
+    create_activate_script
     
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
@@ -915,24 +1115,34 @@ main() {
     echo ""
     echo "🎉 Blockchain Module успешно установлен!"
     echo ""
-    echo "📊 Сервисы мониторинга:"
-    echo "  • Grafana:       http://localhost:3000"
-    echo "  • Prometheus:    http://localhost:9090"
+    echo "📁 Структура проекта:"
+    echo "  • blockchain_module/    - Основной код модуля"
+    echo "  • venv/                - Виртуальное окружение Python"
+    echo "  • configs/             - Конфигурационные файлы"
+    echo "  • data/                - База данных"
+    echo "  • logs/                - Логи"
     echo ""
-    echo "🚀 Управление системой:"
-    echo "  • ./blockchain-manage start   - Запустить систему"
+    echo "🚀 Команды для запуска:"
+    echo "  • ./activate.sh        - Активировать виртуальное окружение"
+    echo "  • ./blockchain-manage start   - Запустить всю систему"
     echo "  • ./blockchain-manage stop    - Остановить систему"
     echo "  • ./blockchain-manage status  - Статус системы"
-    echo "  • ./blockchain-manage logs    - Просмотр логов"
+    echo "  • ./blockchain-manage test    - Запустить тесты"
+    echo "  • ./blockchain-manage cli     - CLI интерфейс"
+    echo ""
+    echo "🌐 Доступные сервисы после запуска:"
+    echo "  • REST API:      http://localhost:8089"
+    echo "  • Grafana:       http://localhost:3000 (admin/admin123)"
+    echo "  • Prometheus:    http://localhost:9090"
     echo ""
     echo "🔧 Настройка:"
     echo "  1. Отредактируйте configs/module_config.json"
     echo "  2. Добавьте ваш API ключ Nownodes"
     echo "  3. Запустите: ./blockchain-manage start"
     echo ""
-    echo "📚 Документация:"
-    echo "  • blockchain-cli --help       - CLI интерфейс"
-    echo "  • http://localhost:8080/api/v1/info - REST API документация"
+    echo "📚 Дополнительно:"
+    echo "  Для работы с модулем активируйте venv: source venv/bin/activate"
+    echo "  Или используйте: ./activate.sh"
     echo ""
 }
 
