@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 2.0.0
+# Version: 2.0.1
 # Author: Blockchain Module Team
 
 set -e
@@ -150,12 +150,24 @@ clean_install_dir() {
         case $choice in
             1)
                 print_info "Удаление старой установки..."
+                # Сохраняем текущую директорию
+                CURRENT_DIR=$(pwd)
+                # Если мы находимся в директории установки, выходим из нее
+                if [[ "$CURRENT_DIR" == "$INSTALL_DIR"* ]]; then
+                    cd "$HOME"
+                fi
                 rm -rf "$INSTALL_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
             2)
                 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
                 print_info "Создание резервной копии: $BACKUP_DIR"
+                # Сохраняем текущую директорию
+                CURRENT_DIR=$(pwd)
+                # Если мы находимся в директории установки, выходим из нее
+                if [[ "$CURRENT_DIR" == "$INSTALL_DIR"* ]]; then
+                    cd "$HOME"
+                fi
                 mv "$INSTALL_DIR" "$BACKUP_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
@@ -495,8 +507,74 @@ setup_monitoring() {
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
-                print_info "Запуск Docker Compose..."
+                print_info "Остановка существующих контейнеров..."
                 cd "$INSTALL_DIR"
+                
+                # Останавливаем и удаляем существующие контейнеры
+                docker-compose down || true
+                
+                # Удаляем существующие контейнеры с конфликтующими именами
+                docker rm -f blockchain_prometheus blockchain_node_exporter blockchain_alertmanager blockchain_cadvisor 2>/dev/null || true
+                
+                # Создаем необходимые директории для томов
+                print_info "Создание директорий для данных мониторинга..."
+                mkdir -p "$INSTALL_DIR/alertmanager_data"
+                mkdir -p "$INSTALL_DIR/prometheus_data"
+                mkdir -p "$INSTALL_DIR/grafana_data"
+                mkdir -p "$INSTALL_DIR/prometheus"
+                
+                # Проверяем и создаем конфигурационные файлы если их нет
+                if [ ! -f "$INSTALL_DIR/prometheus/prometheus.yml" ]; then
+                    cat > "$INSTALL_DIR/prometheus/prometheus.yml" << 'PROMETHEUS_CONFIG'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+rule_files:
+  - "alerts.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'blockchain_module'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+PROMETHEUS_CONFIG
+                fi
+                
+                if [ ! -f "$INSTALL_DIR/prometheus/alerts.yml" ]; then
+                    cat > "$INSTALL_DIR/prometheus/alerts.yml" << 'ALERTS_CONFIG'
+groups:
+  - name: blockchain_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(blockchain_module_errors_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий уровень ошибок в Blockchain Module"
+          description: "Уровень ошибок превысил 10% за последние 5 минут"
+ALERTS_CONFIG
+                fi
+                
+                print_info "Запуск Docker Compose..."
                 docker-compose up -d
                 
                 if [ $? -eq 0 ]; then
@@ -504,11 +582,85 @@ setup_monitoring() {
                     print_info "   Prometheus: http://localhost:9090"
                     print_info "   Grafana:    http://localhost:3000 (admin/admin)"
                     print_info "   Node экспортер: http://localhost:9100"
+                    print_info "   cAdvisor:       http://localhost:8081"
                 else
                     print_error "Ошибка запуска Docker Compose"
+                    print_info "Попробуйте запустить вручную: cd $INSTALL_DIR && docker-compose up -d"
                 fi
             else
                 print_warning "Файл docker-compose.yml не найден"
+                print_info "Создание базового docker-compose.yml..."
+                
+                cat > "$INSTALL_DIR/docker-compose.yml" << 'DOCKER_COMPOSE'
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: blockchain_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: blockchain_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: blockchain_node_exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: blockchain_cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+DOCKER_COMPOSE
+                
+                print_info "Создан базовый docker-compose.yml. Запустите установку мониторинга повторно."
             fi
         fi
     fi
@@ -518,7 +670,12 @@ setup_monitoring() {
 test_installation() {
     print_info "Тестирование установки..."
     
-    source "$VENV_DIR/bin/activate"
+    if [ -f "$VENV_DIR/bin/activate" ]; then
+        source "$VENV_DIR/bin/activate"
+    else
+        print_error "Виртуальное окружение не найдено: $VENV_DIR"
+        return 1
+    fi
     
     # Test imports
     if python -c "import blockchain_module" &> /dev/null; then
@@ -633,6 +790,8 @@ show_summary() {
         echo "   Docker мониторинг: docker-compose up -d"
         echo "   Prometheus:       http://localhost:9090"
         echo "   Grafana:          http://localhost:3000 (admin/admin)"
+        echo "   Node экспортер:   http://localhost:9100"
+        echo "   cAdvisor:         http://localhost:8081"
         echo ""
     fi
     
@@ -647,7 +806,7 @@ show_summary() {
 main_installation() {
     echo ""
     echo "="*60
-    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.0${NC}"
+    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.1${NC}"
     echo "="*60
     echo ""
     
@@ -696,7 +855,10 @@ main_installation() {
     clean_install_dir
     
     # Change to installation directory
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || {
+        print_error "Не удалось перейти в директорию $INSTALL_DIR"
+        exit 1
+    }
     
     # Clone repository
     print_info "Клонирование репозитория..."
@@ -705,6 +867,12 @@ main_installation() {
     # Create virtual environment
     print_info "Создание виртуального окружения..."
     $PYTHON_CMD -m venv "$VENV_DIR"
+    
+    if [ ! -f "$VENV_DIR/bin/activate" ]; then
+        print_error "Не удалось создать виртуальное окружение"
+        exit 1
+    fi
+    
     source "$VENV_DIR/bin/activate"
     
     # Upgrade pip
@@ -717,7 +885,7 @@ main_installation() {
         pip install -r requirements.txt
     else
         # Install core dependencies
-        pip install aiohttp aiosqlite prometheus-client aiohttp-cors psutil
+        pip install aiohttp aiosqlite prometheus-client aiohttp-cors psutil click questionary rich python-dotenv pyyaml pytest
     fi
     
     # Install module in development mode
