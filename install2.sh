@@ -234,7 +234,7 @@ create_directory_structure() {
     
     # Создание файла .env
     if [ ! -f ".env" ]; then
-        cat > .env << EOF
+        cat > .env << 'EOF'
 # Blockchain Module Configuration
 NOWNODES_API_KEY=your_api_key_here
 LOG_LEVEL=INFO
@@ -254,7 +254,7 @@ setup_configuration() {
     
     if [ ! -f "$config_file" ]; then
         # Создаем минимальную конфигурацию
-        cat > "$config_file" << EOF
+        cat > "$config_file" << 'EOF'
 {
   "module_settings": {
     "api_key": "",
@@ -411,7 +411,7 @@ create_systemd_service() {
     local service_file="/etc/systemd/system/blockchain-module.service"
     local install_dir=$(pwd)
     
-    cat > "$service_file" << EOF
+    cat > "$service_file" << 'EOF'
 [Unit]
 Description=Blockchain Module Service
 After=network.target
@@ -639,3 +639,20 @@ except Exception as e:
         print_error "Виртуальное окружение не найдено"
     fi
 }
+
+# Создание документации
+create_documentation() {
+    print_info "Создание документации..."
+    
+    cat > QUICK_START.md << 'EOF'
+# Blockchain Module - Быстрый старт
+
+## 📦 Установка
+
+Модуль установлен автоматически. Все зависимости настроены.
+
+## 🚀 Запуск
+
+### 1. Запуск модуля
+```bash
+./manage.sh start
