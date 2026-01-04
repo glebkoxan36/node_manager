@@ -109,7 +109,6 @@ text
 log_success "README.md created"
 }
 
-Создание setup.py
 create_setup_py() {
 log_info "Creating setup.py..."
 
@@ -174,7 +173,6 @@ text
 log_success "setup.py created"
 }
 
-Создание requirements.txt
 create_requirements_txt() {
 log_info "Creating requirements.txt..."
 
@@ -220,7 +218,6 @@ else
 fi
 }
 
-Проверка и загрузка файлов
 download_missing_files() {
 log_info "Checking and downloading missing files..."
 
@@ -358,7 +355,6 @@ fi
 log_success "Files checked and downloaded"
 }
 
-Проверка системы
 check_system() {
 log_info "Checking system requirements..."
 
@@ -386,7 +382,6 @@ fi
 log_success "System checks passed"
 }
 
-Установка системных зависимостей
 install_system_deps() {
 log_info "Installing system dependencies..."
 
@@ -430,7 +425,6 @@ else
 fi
 }
 
-Настройка директорий
 setup_directories() {
 log_info "Setting up directory structure..."
 
@@ -440,7 +434,6 @@ mkdir -p prometheus grafana data logs
 log_success "Directories created"
 }
 
-Установка Python зависимостей
 install_python_deps() {
 log_info "Installing Python dependencies..."
 
@@ -479,7 +472,6 @@ else
 fi
 }
 
-Тестирование установки
 test_installation() {
 log_info "Testing installation..."
 
@@ -516,7 +508,6 @@ fi
 fi
 }
 
-Создание скрипта управления
 create_management_script() {
 log_info "Creating management scripts..."
 
@@ -743,7 +734,6 @@ chmod +x start.sh
 log_success "Management scripts created"
 }
 
-Основная функция установки
 main_installation() {
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════════════╗"
