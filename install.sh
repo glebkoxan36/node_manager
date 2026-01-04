@@ -201,7 +201,6 @@ text
 log_success "requirements.txt created"
 }
 
-Загрузка файла с GitHub
 download_file() {
 local url="$1"
 local output="$2"
