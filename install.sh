@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 1.1.0
+# Version: 1.2.0
 # Author: Blockchain Module Team
 
 set -e
@@ -11,124 +11,79 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Configuration
 REPO_URL="https://github.com/glebkoxan36/node_manager.git"
 INSTALL_DIR="$HOME/blockchain_module"
 VENV_DIR="$INSTALL_DIR/venv"
 
-# Detect OS
-detect_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS=$ID
-        OS_VERSION=$VERSION_ID
-    elif [ -f /etc/redhat-release ]; then
-        OS="centos"
-        OS_VERSION=$(cat /etc/redhat-release | sed 's/.*release \([0-9]\.[0-9]\).*/\1/')
+# Функция для очистки директории установки
+clean_install_dir() {
+    echo -e "${BLUE}[INFO]${NC} Очистка директории установки..."
+    
+    if [ -d "$INSTALL_DIR" ]; then
+        echo -e "${YELLOW}[WARNING]${NC} Директория $INSTALL_DIR уже существует"
+        echo "Выберите действие:"
+        echo "1) Удалить и переустановить (рекомендуется)"
+        echo "2) Создать резервную копию и переустановить"
+        echo "3) Выйти"
+        
+        read -r choice
+        case $choice in
+            1)
+                echo "Удаление старой установки..."
+                rm -rf "$INSTALL_DIR"
+                mkdir -p "$INSTALL_DIR"
+                ;;
+            2)
+                BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
+                echo "Создание резервной копии: $BACKUP_DIR"
+                mv "$INSTALL_DIR" "$BACKUP_DIR"
+                mkdir -p "$INSTALL_DIR"
+                ;;
+            3)
+                echo -e "${RED}[ERROR]${NC} Прервано пользователем"
+                exit 1
+                ;;
+            *)
+                echo -e "${RED}[ERROR]${NC} Неверный выбор"
+                exit 1
+                ;;
+        esac
     else
-        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        mkdir -p "$INSTALL_DIR"
     fi
-    echo "$OS $OS_VERSION"
 }
 
-# Install Python 3.9 on Ubuntu/Debian
-install_python_ubuntu() {
-    echo -e "${BLUE}[INFO]${NC} Установка Python 3.9 на Ubuntu/Debian..."
+# Функция для проверки Python
+check_python() {
+    echo -e "${BLUE}[INFO]${NC} Проверка Python..."
     
-    apt-get update
-    apt-get install -y software-properties-common
-    add-apt-repository -y ppa:deadsnakes/ppa
-    apt-get update
-    apt-get install -y python3.9 python3.9-dev python3.9-distutils python3.9-venv
-    apt-get install -y python3-pip
-    
-    # Create symlink if python3.9 is installed but python3 points to older version
-    if command -v python3.9 &> /dev/null && ! command -v python3 &> /dev/null; then
-        ln -s /usr/bin/python3.9 /usr/bin/python3
-    fi
-    
-    echo -e "${GREEN}[SUCCESS]${NC} Python 3.9 установлен"
-}
-
-# Install Python 3.9 on CentOS/RHEL
-install_python_centos() {
-    echo -e "${BLUE}[INFO]${NC} Установка Python 3.9 на CentOS/RHEL..."
-    
-    yum install -y gcc openssl-devel bzip2-devel libffi-devel zlib-devel
-    yum install -y wget make
-    
-    cd /tmp
-    wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
-    tar xzf Python-3.9.18.tgz
-    cd Python-3.9.18
-    ./configure --enable-optimizations
-    make altinstall
-    
-    # Create symlinks
-    if [ -f /usr/local/bin/python3.9 ]; then
-        ln -sf /usr/local/bin/python3.9 /usr/bin/python3
-        ln -sf /usr/local/bin/python3.9 /usr/bin/python3.9
-    fi
-    
-    # Install pip
-    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    python3.9 get-pip.py
-    
-    echo -e "${GREEN}[SUCCESS]${NC} Python 3.9 установлен"
-}
-
-# Install Python 3.9 based on OS
-install_python39() {
-    OS_INFO=$(detect_os)
-    OS=$(echo $OS_INFO | awk '{print $1}')
-    
-    echo -e "${YELLOW}[WARNING]${NC} Python 3.7+ не найден. Установка Python 3.9..."
-    
-    case $OS in
-        ubuntu|debian)
-            install_python_ubuntu
-            ;;
-        centos|rhel|fedora)
-            install_python_centos
-            ;;
-        *)
-            echo -e "${RED}[ERROR]${NC} Неподдерживаемая ОС: $OS"
-            echo "Пожалуйста, установите Python 3.9 вручную и повторите попытку."
-            exit 1
-            ;;
-    esac
-}
-
-# Check and install Python 3.9
-check_install_python() {
-    echo -e "${BLUE}[INFO]${NC} Проверка наличия Python 3.7+..."
-    
-    # Check for python3.9 first
+    # Проверяем python3.9
     if command -v python3.9 &> /dev/null; then
         PYTHON_VERSION="python3.9"
         echo -e "${GREEN}[SUCCESS]${NC} Найден Python 3.9"
         return 0
     fi
     
-    # Check for python3.8
+    # Проверяем python3.8
     if command -v python3.8 &> /dev/null; then
         PYTHON_VERSION="python3.8"
         echo -e "${GREEN}[SUCCESS]${NC} Найден Python 3.8"
         return 0
     fi
     
-    # Check for python3.7
+    # Проверяем python3.7
     if command -v python3.7 &> /dev/null; then
         PYTHON_VERSION="python3.7"
         echo -e "${GREEN}[SUCCESS]${NC} Найден Python 3.7"
         return 0
     fi
     
-    # Check for python3
+    # Проверяем python3
     if command -v python3 &> /dev/null; then
-        # Check python3 version
+        # Проверяем версию
         PY3_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
         if [[ $PY3_VERSION == "3.7"* ]] || [[ $PY3_VERSION == "3.8"* ]] || [[ $PY3_VERSION == "3.9"* ]] || [[ $PY3_VERSION == "3.10"* ]]; then
             PYTHON_VERSION="python3"
@@ -137,72 +92,73 @@ check_install_python() {
         fi
     fi
     
-    # Python not found or version too old
-    echo -e "${RED}[ERROR]${NC} Python 3.7+ не найден"
+    return 1
+}
+
+# Функция для установки Python 3.9
+install_python39() {
+    echo -e "${YELLOW}[WARNING]${NC} Python 3.7+ не найден. Установка Python 3.9..."
     
-    # Ask for installation
-    read -p "Установить Python 3.9 автоматически? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        install_python39
-        
-        # Verify installation
-        if command -v python3.9 &> /dev/null; then
-            PYTHON_VERSION="python3.9"
-            echo -e "${GREEN}[SUCCESS]${NC} Python 3.9 успешно установлен"
-            return 0
-        elif command -v python3 &> /dev/null; then
-            PYTHON_VERSION="python3"
-            echo -e "${GREEN}[SUCCESS]${NC} Python 3 успешно установлен"
-            return 0
-        else
-            echo -e "${RED}[ERROR]${NC} Не удалось установить Python 3.9"
-            exit 1
-        fi
+    # Определяем ОС
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case $ID in
+            ubuntu|debian)
+                echo "Установка Python 3.9 на Ubuntu/Debian..."
+                apt-get update
+                apt-get install -y software-properties-common
+                add-apt-repository -y ppa:deadsnakes/ppa
+                apt-get update
+                apt-get install -y python3.9 python3.9-venv python3.9-distutils
+                
+                # Устанавливаем pip для python3.9
+                curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9
+                
+                # Создаем симлинки
+                if command -v python3.9 &> /dev/null && ! command -v python3 &> /dev/null; then
+                    ln -s /usr/bin/python3.9 /usr/bin/python3
+                fi
+                ;;
+            centos|rhel|fedora)
+                echo "Установка Python 3.9 на CentOS/RHEL/Fedora..."
+                yum install -y gcc openssl-devel bzip2-devel libffi-devel zlib-devel wget make
+                
+                cd /tmp
+                wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+                tar xzf Python-3.9.18.tgz
+                cd Python-3.9.18
+                ./configure --enable-optimizations
+                make altinstall
+                
+                # Устанавливаем pip
+                curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9
+                ;;
+            *)
+                echo -e "${RED}[ERROR]${NC} Неподдерживаемая ОС"
+                exit 1
+                ;;
+        esac
     else
-        echo -e "${RED}[ERROR]${NC} Установите Python 3.9 вручную и повторите попытку."
-        echo "Для Ubuntu/Debian: sudo apt-get install python3.9 python3.9-venv"
-        echo "Для CentOS/RHEL: sudo yum install python39"
+        echo -e "${RED}[ERROR]${NC} Не удалось определить ОС"
+        exit 1
+    fi
+    
+    # Проверяем установку
+    if command -v python3.9 &> /dev/null; then
+        PYTHON_VERSION="python3.9"
+        echo -e "${GREEN}[SUCCESS]${NC} Python 3.9 успешно установлен"
+        return 0
+    elif command -v python3 &> /dev/null; then
+        PYTHON_VERSION="python3"
+        echo -e "${GREEN}[SUCCESS]${NC} Python 3 успешно установлен"
+        return 0
+    else
+        echo -e "${RED}[ERROR]${NC} Не удалось установить Python"
         exit 1
     fi
 }
 
-# Check prerequisites
-check_prerequisites() {
-    echo -e "${BLUE}[INFO]${NC} Проверка системных требований..."
-    
-    # Check Python
-    check_install_python
-    
-    # Check pip
-    if ! command -v pip3 &> /dev/null; then
-        echo -e "${YELLOW}[WARNING]${NC} pip3 не найден. Установка..."
-        curl -sS https://bootstrap.pypa.io/get-pip.py | python3
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}[ERROR]${NC} Не удалось установить pip3"
-            exit 1
-        fi
-    fi
-    
-    # Check git
-    if ! command -v git &> /dev/null; then
-        echo -e "${YELLOW}[WARNING]${NC} Git не найден. Установка..."
-        OS_INFO=$(detect_os)
-        OS=$(echo $OS_INFO | awk '{print $1}')
-        case $OS in
-            ubuntu|debian)
-                apt-get install -y git
-                ;;
-            centos|rhel|fedora)
-                yum install -y git
-                ;;
-        esac
-    fi
-    
-    echo -e "${GREEN}[SUCCESS]${NC} Все зависимости проверены"
-}
-
-# Main installation
+# Главная функция установки
 main() {
     echo ""
     echo "==============================================="
@@ -210,7 +166,7 @@ main() {
     echo "==============================================="
     echo ""
     
-    # Check if running as root
+    # Проверяем, запущен ли от root
     if [ "$EUID" -eq 0 ]; then 
         echo -e "${YELLOW}[WARNING]${NC} Скрипт запущен от root"
         echo "Это нормально для установки системных зависимостей."
@@ -222,64 +178,84 @@ main() {
         fi
     fi
     
-    # Check prerequisites
-    check_prerequisites
+    # Проверяем Python
+    if ! check_python; then
+        echo -e "${YELLOW}[WARNING]${NC} Python 3.7+ не найден"
+        read -p "Установить Python 3.9 автоматически? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            install_python39
+        else
+            echo -e "${RED}[ERROR]${NC} Установите Python 3.9 вручную и повторите попытку"
+            exit 1
+        fi
+    fi
     
-    # Create installation directory
-    echo -e "${BLUE}[INFO]${NC} Создание директории установки..."
-    mkdir -p "$INSTALL_DIR"
+    # Проверяем pip
+    if ! command -v pip3 &> /dev/null; then
+        echo -e "${YELLOW}[WARNING]${NC} pip3 не найден. Установка..."
+        curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+    fi
+    
+    # Проверяем git
+    if ! command -v git &> /dev/null; then
+        echo -e "${YELLOW}[WARNING]${NC} Git не найден. Установка..."
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            case $ID in
+                ubuntu|debian)
+                    apt-get install -y git
+                    ;;
+                centos|rhel|fedora)
+                    yum install -y git
+                    ;;
+            esac
+        fi
+    fi
+    
+    # Очищаем директорию установки
+    clean_install_dir
+    
+    # Переходим в директорию установки
     cd "$INSTALL_DIR"
     
-    # Clone repository
+    # Клонируем репозиторий
     echo -e "${BLUE}[INFO]${NC} Клонирование репозитория..."
-    if [ -d ".git" ]; then
-        echo "Репозиторий уже существует. Обновление..."
-        git pull
-    else
-        git clone "$REPO_URL" .
-    fi
+    git clone "$REPO_URL" .
     
-    # Setup virtual environment
+    # Создаем виртуальное окружение
     echo -e "${BLUE}[INFO]${NC} Создание виртуального окружения..."
-    if [ -d "$VENV_DIR" ]; then
-        echo "Виртуальное окружение уже существует. Пересоздание..."
-        rm -rf "$VENV_DIR"
-    fi
-    
-    # Create venv with detected python version
     $PYTHON_VERSION -m venv "$VENV_DIR"
     source "$VENV_DIR/bin/activate"
     
-    # Upgrade pip
+    # Обновляем pip
     echo -e "${BLUE}[INFO]${NC} Обновление pip..."
     pip install --upgrade pip
     
-    # Install dependencies
+    # Устанавливаем зависимости
     echo -e "${BLUE}[INFO]${NC} Установка зависимостей Python..."
     if [ -f "requirements.txt" ]; then
         pip install -r requirements.txt
     else
-        # Install core dependencies
+        # Основные зависимости
         pip install aiohttp aiosqlite prometheus-client aiohttp-cors psutil
     fi
     
-    # Install module in development mode
+    # Устанавливаем модуль
     if [ -f "setup.py" ]; then
         pip install -e .
     fi
     
-    # Configure module
-    echo -e "${BLUE}[INFO]${NC} Настройка модуля..."
-    
-    # Create config directory
+    # Создаем конфигурационную директорию
     mkdir -p "$INSTALL_DIR/configs"
     
-    # Create default config if it doesn't exist
+    # Создаем конфигурационный файл, если его нет
     if [ ! -f "$INSTALL_DIR/configs/module_config.json" ]; then
+        echo -e "${BLUE}[INFO]${NC} Создание конфигурационного файла..."
         cat > "$INSTALL_DIR/configs/module_config.json" << EOF
 {
   "module_settings": {
-    "api_key": "ВАШ_API_КЛЮЧ_ЗДЕСЬ",
+    "api_key": "ВАШ_API_КЛЮЧ_NOWNODES_ЗДЕСЬ",
     "log_level": "INFO",
     "connection_pool_size": 10,
     "default_confirmations": 3,
@@ -333,62 +309,62 @@ main() {
   }
 }
 EOF
-        echo -e "${YELLOW}[WARNING]${NC} Конфигурационный файл создан. Отредактируйте configs/module_config.json и добавьте ваш API ключ Nownodes."
+        echo -e "${YELLOW}[WARNING]${NC} Отредактируйте configs/module_config.json и добавьте ваш API ключ Nownodes!"
     fi
     
-    # Create startup script
+    # Создаем скрипт запуска
     echo -e "${BLUE}[INFO]${NC} Создание скрипта запуска..."
     cat > "$INSTALL_DIR/start.sh" << 'EOF'
 #!/bin/bash
 
-# Blockchain Module Startup Script
 cd "$(dirname "$0")"
 
-# Activate virtual environment
-if [ -d "venv" ]; then
-    source venv/bin/activate
-else
+# Проверяем виртуальное окружение
+if [ ! -d "venv" ]; then
     echo "Ошибка: Виртуальное окружение не найдено"
+    echo "Сначала выполните: python3 -m venv venv"
     exit 1
 fi
 
-# Run the module
+# Активируем виртуальное окружение
+source venv/bin/activate
+
+# Запускаем модуль
 python -m blockchain_module
 EOF
     
     chmod +x "$INSTALL_DIR/start.sh"
     
-    # Create CLI script
+    # Создаем скрипт CLI
     cat > "$INSTALL_DIR/cli.sh" << 'EOF'
 #!/bin/bash
 
-# Blockchain Module CLI Script
 cd "$(dirname "$0")"
 
-# Activate virtual environment
-if [ -d "venv" ]; then
-    source venv/bin/activate
-else
+# Проверяем виртуальное окружение
+if [ ! -d "venv" ]; then
     echo "Ошибка: Виртуальное окружение не найдено"
     exit 1
 fi
 
-# Run CLI
+# Активируем виртуальное окружение
+source venv/bin/activate
+
+# Запускаем CLI
 python -m blockchain_module.cli "$@"
 EOF
     
     chmod +x "$INSTALL_DIR/cli.sh"
     
-    # Test installation
+    # Тестируем установку
     echo -e "${BLUE}[INFO]${NC} Тестирование установки..."
-    source "$VENV_DIR/bin/activate"
-    if python -c "import blockchain_module; print('Модуль импортирован успешно')" &> /dev/null; then
-        echo -e "${GREEN}[SUCCESS]${NC} Модуль установлен успешно"
+    if python -c "import blockchain_module" &> /dev/null; then
+        echo -e "${GREEN}[SUCCESS]${NC} Модуль успешно импортирован"
     else
-        echo -e "${YELLOW}[WARNING]${NC} Модуль не может быть импортирован, но установка продолжена"
+        echo -e "${YELLOW}[WARNING]${NC} Модуль не может быть импортирован (возможно, требуется настройка конфигурации)"
     fi
     
-    # Show summary
+    # Выводим итоговую информацию
     echo ""
     echo "==============================================="
     echo -e "${GREEN}Установка завершена успешно!${NC}"
@@ -397,23 +373,24 @@ EOF
     echo -e "${BLUE}Директория установки:${NC} $INSTALL_DIR"
     echo ""
     echo -e "${BLUE}Команды запуска:${NC}"
-    echo "  Основной запуск:  $INSTALL_DIR/start.sh"
-    echo "  CLI интерфейс:    $INSTALL_DIR/cli.sh"
-    echo "  Ручной запуск:    cd $INSTALL_DIR && source venv/bin/activate && python -m blockchain_module"
+    echo "  $INSTALL_DIR/start.sh    - запуск модуля"
+    echo "  $INSTALL_DIR/cli.sh      - CLI интерфейс"
     echo ""
     echo -e "${BLUE}Настройка:${NC}"
-    echo "  1. Отредактируйте файл конфигурации: $INSTALL_DIR/configs/module_config.json"
-    echo "  2. Добавьте ваш API ключ Nownodes в поле 'api_key'"
-    echo "  3. При необходимости настройте другие параметры"
+    echo "  1. Отредактируйте файл конфигурации:"
+    echo "     $INSTALL_DIR/configs/module_config.json"
     echo ""
-    echo -e "${BLUE}Проверка работы:${NC}"
+    echo "  2. Добавьте ваш API ключ Nownodes в поле 'api_key'"
+    echo ""
+    echo -e "${BLUE}Запуск:${NC}"
     echo "  cd $INSTALL_DIR"
     echo "  ./start.sh"
     echo ""
-    echo "Для мониторинга также можно запустить Docker контейнеры:"
+    echo -e "${BLUE}Мониторинг (опционально):${NC}"
+    echo "  Для запуска Docker мониторинга:"
     echo "  docker-compose up -d  (если docker-compose.yml присутствует)"
     echo ""
 }
 
-# Run main function
+# Запускаем установку
 main
