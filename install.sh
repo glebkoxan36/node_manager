@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 2.0.5
+# Version: 2.0.6
 # Author: Blockchain Module Team
 
 set -e
@@ -234,7 +234,7 @@ async def run_services():
         # Запуск мониторинга
         print("\n📊 Запуск мониторинга...")
         if start_monitoring():
-            print("✅ Мониторинг Prometheus запущен")
+            print("✅ Мониторинг Prometheus запущен"
         else:
             print("⚠️  Мониторинг не запущен")
         
@@ -559,8 +559,6 @@ services:
       - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
     restart: unless-stopped
     privileged: true
-    network_mode: "host"
-    pid: "host"
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
@@ -574,7 +572,6 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     restart: unless-stopped
-    privileged: true
 
 volumes:
   prometheus_data:
@@ -608,22 +605,25 @@ scrape_configs:
 PROMETHEUS_CONFIG
             
             print_info "Запуск Docker Compose..."
-            docker-compose up -d
             
-            if [ $? -eq 0 ]; then
+            # Запускаем без node-exporter если есть проблемы
+            if docker-compose up -d prometheus grafana cadvisor; then
+                print_info "Запуск node-exporter..."
+                docker-compose up -d node-exporter 2>/dev/null || true
+                
                 print_success "Docker мониторинг запущен"
                 echo ""
                 echo -e "${GREEN}🔗 Доступные сервисы:${NC}"
                 echo "   Prometheus:       http://localhost:9090"
                 echo "   Grafana:          http://localhost:3000"
                 echo "   Логин Grafana:    admin / admin"
-                echo "   Node экспортер:   http://localhost:9100"
+                echo "   Node экспортер:   http://localhost:9100 (если запущен)"
                 echo "   cAdvisor:         http://localhost:8081"
                 echo ""
                 print_info "Проверьте работу сервисов через несколько секунд"
             else
                 print_warning "Не удалось запустить все сервисы мониторинга"
-                print_info "Попробуйте запустить вручную:"
+                print_info "Попробуйте запустить только Prometheus и Grafana:"
                 print_info "cd $INSTALL_DIR && docker-compose up -d prometheus grafana"
             fi
         fi
@@ -756,11 +756,11 @@ show_summary() {
     
     if command -v docker &> /dev/null; then
         echo -e "${BLUE}📊 Мониторинг:${NC}"
-        echo "   Docker мониторинг: docker-compose up -d"
         echo "   Prometheus:       http://localhost:9090"
         echo "   Grafana:          http://localhost:3000 (admin/admin)"
         echo "   Node экспортер:   http://localhost:9100"
         echo "   cAdvisor:         http://localhost:8081"
+        echo "   Команда запуска:  cd $INSTALL_DIR && docker-compose up -d"
         echo ""
     fi
     
@@ -778,7 +778,7 @@ main_installation() {
     
     echo ""
     echo "============================================================"
-    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.5${NC}"
+    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.6${NC}"
     echo "============================================================"
     echo ""
     
