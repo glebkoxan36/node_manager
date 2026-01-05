@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 2.0.3
+# Version: 2.0.4
 # Author: Blockchain Module Team
 
 set -e
@@ -35,18 +35,11 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Safe directory change
-safe_cd() {
-    local target_dir="$1"
-    if [ -d "$target_dir" ]; then
-        cd "$target_dir" || {
-            print_error "Не удалось перейти в директорию: $target_dir"
-            return 1
-        }
-        return 0
-    else
-        print_error "Директория не существует: $target_dir"
-        return 1
+# Fix shell directory issue
+fix_shell_directory() {
+    # Try to fix the "No such file or directory" error
+    if [ ! -w "." ]; then
+        cd /tmp || cd "$HOME" || cd /
     fi
 }
 
@@ -165,9 +158,11 @@ clean_install_dir() {
         case $choice in
             1)
                 print_info "Удаление старой установки..."
-                # Сохраняем текущую директорию
-                if [ -w "/" ]; then
-                    cd /tmp 2>/dev/null || cd "$HOME"
+                # Go to a safe directory
+                if [ -d "/tmp" ] && [ -w "/tmp" ]; then
+                    cd /tmp 2>/dev/null || true
+                else
+                    cd "$HOME" 2>/dev/null || true
                 fi
                 rm -rf "$INSTALL_DIR"
                 mkdir -p "$INSTALL_DIR"
@@ -175,9 +170,11 @@ clean_install_dir() {
             2)
                 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
                 print_info "Создание резервной копии: $BACKUP_DIR"
-                # Сохраняем текущую директорию
-                if [ -w "/" ]; then
-                    cd /tmp 2>/dev/null || cd "$HOME"
+                # Go to a safe directory
+                if [ -d "/tmp" ] && [ -w "/tmp" ]; then
+                    cd /tmp 2>/dev/null || true
+                else
+                    cd "$HOME" 2>/dev/null || true
                 fi
                 mv "$INSTALL_DIR" "$BACKUP_DIR"
                 mkdir -p "$INSTALL_DIR"
@@ -202,6 +199,7 @@ create_main_py() {
     
     if [ ! -f "$main_py_path" ]; then
         print_info "Создание __main__.py..."
+        mkdir -p "$(dirname "$main_py_path")"
         cat > "$main_py_path" << 'EOF'
 #!/usr/bin/env python3
 """
@@ -492,21 +490,6 @@ EOF
     else
         print_info "Конфигурационный файл уже существует"
     fi
-    
-    # Copy existing config files if available
-    if [ -f "$INSTALL_DIR/prometheus.yml" ]; then
-        mkdir -p "$INSTALL_DIR/prometheus"
-        cp "$INSTALL_DIR/prometheus.yml" "$INSTALL_DIR/prometheus/"
-    fi
-    
-    if [ -f "$INSTALL_DIR/alerts.yml" ]; then
-        cp "$INSTALL_DIR/alerts.yml" "$INSTALL_DIR/prometheus/" 2>/dev/null || true
-    fi
-    
-    if [ -f "$INSTALL_DIR/blockchain_dashboard.json" ]; then
-        mkdir -p "$INSTALL_DIR/grafana/dashboards"
-        cp "$INSTALL_DIR/blockchain_dashboard.json" "$INSTALL_DIR/grafana/dashboards/"
-    fi
 }
 
 # Setup monitoring services (optional)
@@ -517,113 +500,14 @@ setup_monitoring() {
         read -p "Запустить Docker мониторинг (Prometheus/Grafana)? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
-                print_info "Остановка существующих контейнеров..."
-                cd "$INSTALL_DIR"
+            cd "$INSTALL_DIR"
+            
+            # Check for existing docker-compose.yml
+            if [ -f "docker-compose.yml" ]; then
+                print_info "Обнаружен существующий docker-compose.yml"
                 
-                # Останавливаем и удаляем существующие контейнеры
-                docker-compose down || true
-                
-                # Создаем необходимые директории для томов
-                print_info "Создание директорий для данных мониторинга..."
-                mkdir -p "$INSTALL_DIR/alertmanager_data" 2>/dev/null || true
-                mkdir -p "$INSTALL_DIR/prometheus_data" 2>/dev/null || true
-                mkdir -p "$INSTALL_DIR/grafana_data" 2>/dev/null || true
-                
-                # Проверяем наличие конфигурационных файлов Docker
-                if [ -d "$INSTALL_DIR/docker" ]; then
-                    print_info "Проверка конфигурационных файлов Docker..."
-                    
-                    # Проверяем и создаем prometheus.yml если его нет
-                    if [ ! -f "$INSTALL_DIR/docker/prometheus/prometheus.yml" ] && [ -d "$INSTALL_DIR/docker/prometheus" ]; then
-                        cat > "$INSTALL_DIR/docker/prometheus/prometheus.yml" << 'PROMETHEUS_CONFIG'
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-          - alertmanager:9093
-
-rule_files:
-  - "alerts.yml"
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: 'node_exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
-
-  - job_name: 'blockchain_module'
-    static_configs:
-      - targets: ['host.docker.internal:9090']
-PROMETHEUS_CONFIG
-                    fi
-                    
-                    # Проверяем и создаем alerts.yml если его нет
-                    if [ ! -f "$INSTALL_DIR/docker/prometheus/alerts.yml" ] && [ -d "$INSTALL_DIR/docker/prometheus" ]; then
-                        cat > "$INSTALL_DIR/docker/prometheus/alerts.yml" << 'ALERTS_CONFIG'
-groups:
-  - name: blockchain_alerts
-    rules:
-      - alert: HighErrorRate
-        expr: rate(blockchain_module_errors_total[5m]) > 0.1
-        for: 1m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Высокий уровень ошибок в Blockchain Module"
-          description: "Уровень ошибок превысил 10% за последние 5 минут"
-ALERTS_CONFIG
-                    fi
-                    
-                    # Проверяем и создаем alertmanager.yml если его нет
-                    if [ ! -f "$INSTALL_DIR/docker/alertmanager/alertmanager.yml" ] && [ -d "$INSTALL_DIR/docker/alertmanager" ]; then
-                        mkdir -p "$INSTALL_DIR/docker/alertmanager"
-                        cat > "$INSTALL_DIR/docker/alertmanager/alertmanager.yml" << 'ALERTMANAGER_CONFIG'
-global:
-  smtp_smarthost: 'localhost:25'
-  smtp_from: 'alertmanager@example.com'
-
-route:
-  receiver: 'email'
-
-receivers:
-  - name: 'email'
-    email_configs:
-      - to: 'admin@example.com'
-ALERTMANAGER_CONFIG
-                    fi
-                fi
-                
-                print_info "Запуск Docker Compose..."
-                # Запускаем только базовые сервисы, без alertmanager если есть проблемы
-                docker-compose up -d prometheus grafana node-exporter cadvisor 2>/dev/null || docker-compose up -d
-                
-                if [ $? -eq 0 ]; then
-                    print_success "Docker мониторинг запущен"
-                    print_info "   Prometheus: http://localhost:9090"
-                    print_info "   Grafana:    http://localhost:3000 (admin/admin)"
-                    print_info "   Node экспортер: http://localhost:9100"
-                    print_info "   cAdvisor:       http://localhost:8081"
-                else
-                    print_warning "Не удалось запустить все сервисы мониторинга"
-                    print_info "Попробуйте запустить вручную: cd $INSTALL_DIR && docker-compose up -d prometheus grafana"
-                fi
-            else
-                print_warning "Файл docker-compose.yml не найден"
-                print_info "Создание базового docker-compose.yml..."
-                
-                cat > "$INSTALL_DIR/docker-compose.yml" << 'DOCKER_COMPOSE'
+                # Create a simplified docker-compose.yml for monitoring only
+                cat > docker-compose-monitoring.yml << 'DOCKER_COMPOSE'
 version: '3.8'
 
 services:
@@ -633,8 +517,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -654,7 +537,6 @@ services:
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
     restart: unless-stopped
     depends_on:
       - prometheus
@@ -692,9 +574,141 @@ volumes:
   grafana_data:
 DOCKER_COMPOSE
                 
-                # Создаем директории для конфигурационных файлов
-                mkdir -p "$INSTALL_DIR/prometheus"
-                mkdir -p "$INSTALL_DIR/grafana/dashboards"
+                # Create monitoring directory
+                mkdir -p monitoring
+                
+                # Create prometheus config
+                cat > monitoring/prometheus.yml << 'PROMETHEUS_CONFIG'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'blockchain_module'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+PROMETHEUS_CONFIG
+                
+                print_info "Запуск Docker Compose для мониторинга..."
+                docker-compose -f docker-compose-monitoring.yml up -d
+                
+                if [ $? -eq 0 ]; then
+                    print_success "Docker мониторинг запущен"
+                    print_info "   Prometheus: http://localhost:9090"
+                    print_info "   Grafana:    http://localhost:3000 (admin/admin)"
+                    print_info "   Node экспортер: http://localhost:9100"
+                    print_info "   cAdvisor:       http://localhost:8081"
+                else
+                    print_warning "Не удалось запустить все сервисы мониторинга"
+                    print_info "Попробуйте запустить вручную: cd $INSTALL_DIR && docker-compose -f docker-compose-monitoring.yml up -d prometheus grafana"
+                fi
+            else
+                print_warning "Файл docker-compose.yml не найден"
+                print_info "Создание базового docker-compose.yml для мониторинга..."
+                
+                # Create the same monitoring configuration
+                mkdir -p monitoring
+                cat > monitoring/prometheus.yml << 'PROMETHEUS_CONFIG'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'blockchain_module'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+PROMETHEUS_CONFIG
+                
+                cat > docker-compose.yml << 'DOCKER_COMPOSE'
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: blockchain_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: blockchain_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: blockchain_node_exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: blockchain_cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+DOCKER_COMPOSE
                 
                 print_info "Создан базовый docker-compose.yml"
                 print_info "Для запуска мониторинга выполните: cd $INSTALL_DIR && docker-compose up -d"
@@ -793,9 +807,9 @@ EOF
 # Show installation summary
 show_summary() {
     echo ""
-    echo "="*60
+    echo "============================================================"
     echo -e "${GREEN}✅ Blockchain Module успешно установлен!${NC}"
-    echo "="*60
+    echo "============================================================"
     echo ""
     echo -e "${BLUE}📁 Директория установки:${NC}"
     echo "   $INSTALL_DIR"
@@ -836,16 +850,19 @@ show_summary() {
     echo "   GitHub: https://github.com/glebkoxan36/node_manager"
     echo "   Issues: https://github.com/glebkoxan36/node_manager/issues"
     echo ""
-    echo "="*60
+    echo "============================================================"
 }
 
 # Main installation function
 main_installation() {
     echo ""
-    echo "="*60
-    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.3${NC}"
-    echo "="*60
+    echo "============================================================"
+    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.4${NC}"
+    echo "============================================================"
     echo ""
+    
+    # Fix shell directory issue at the very beginning
+    fix_shell_directory
     
     # Check if running as root
     if [ "$EUID" -eq 0 ]; then 
