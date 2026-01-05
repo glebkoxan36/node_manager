@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 2.0.2
+# Version: 2.0.3
 # Author: Blockchain Module Team
 
 set -e
@@ -47,16 +47,6 @@ safe_cd() {
     else
         print_error "Директория не существует: $target_dir"
         return 1
-    fi
-}
-
-# Get safe directory
-get_safe_dir() {
-    # Try to get current directory, fallback to home if fails
-    if current_dir=$(pwd 2>/dev/null); then
-        echo "$current_dir"
-    else
-        echo "$HOME"
     fi
 }
 
@@ -175,20 +165,20 @@ clean_install_dir() {
         case $choice in
             1)
                 print_info "Удаление старой установки..."
-                # Сохраняем безопасную директорию перед удалением
-                SAFE_DIR=$(get_safe_dir)
-                print_info "Переход в безопасную директорию: $SAFE_DIR"
-                cd "$SAFE_DIR" || cd "$HOME"
+                # Сохраняем текущую директорию
+                if [ -w "/" ]; then
+                    cd /tmp 2>/dev/null || cd "$HOME"
+                fi
                 rm -rf "$INSTALL_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
             2)
                 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
                 print_info "Создание резервной копии: $BACKUP_DIR"
-                # Сохраняем безопасную директорию перед перемещением
-                SAFE_DIR=$(get_safe_dir)
-                print_info "Переход в безопасную директорию: $SAFE_DIR"
-                cd "$SAFE_DIR" || cd "$HOME"
+                # Сохраняем текущую директорию
+                if [ -w "/" ]; then
+                    cd /tmp 2>/dev/null || cd "$HOME"
+                fi
                 mv "$INSTALL_DIR" "$BACKUP_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
@@ -259,7 +249,7 @@ async def run_services():
         # Запуск REST API
         print("🌐 Запуск REST API...")
         if start_rest_api_server():
-            print("✅ REST API сервер запущен"
+            print("✅ REST API сервер запущен")
         else:
             print("⚠️  REST API сервер не запущен")
         
@@ -306,7 +296,7 @@ def main():
             # Запускаем сервисы
             return asyncio.run(run_services())
     except KeyboardInterrupt:
-        print("\n\n👋 Завернение работы...")
+        print("\n\n👋 Завершение работы...")
         return 0
     except Exception as e:
         print(f"❌ Критическая ошибка: {e}")
@@ -534,19 +524,19 @@ setup_monitoring() {
                 # Останавливаем и удаляем существующие контейнеры
                 docker-compose down || true
                 
-                # Удаляем существующие контейнеры с конфликтующими именами
-                docker rm -f blockchain_prometheus blockchain_node_exporter blockchain_alertmanager blockchain_cadvisor 2>/dev/null || true
-                
                 # Создаем необходимые директории для томов
                 print_info "Создание директорий для данных мониторинга..."
-                mkdir -p "$INSTALL_DIR/alertmanager_data"
-                mkdir -p "$INSTALL_DIR/prometheus_data"
-                mkdir -p "$INSTALL_DIR/grafana_data"
-                mkdir -p "$INSTALL_DIR/prometheus"
+                mkdir -p "$INSTALL_DIR/alertmanager_data" 2>/dev/null || true
+                mkdir -p "$INSTALL_DIR/prometheus_data" 2>/dev/null || true
+                mkdir -p "$INSTALL_DIR/grafana_data" 2>/dev/null || true
                 
-                # Проверяем и создаем конфигурационные файлы если их нет
-                if [ ! -f "$INSTALL_DIR/prometheus/prometheus.yml" ]; then
-                    cat > "$INSTALL_DIR/prometheus/prometheus.yml" << 'PROMETHEUS_CONFIG'
+                # Проверяем наличие конфигурационных файлов Docker
+                if [ -d "$INSTALL_DIR/docker" ]; then
+                    print_info "Проверка конфигурационных файлов Docker..."
+                    
+                    # Проверяем и создаем prometheus.yml если его нет
+                    if [ ! -f "$INSTALL_DIR/docker/prometheus/prometheus.yml" ] && [ -d "$INSTALL_DIR/docker/prometheus" ]; then
+                        cat > "$INSTALL_DIR/docker/prometheus/prometheus.yml" << 'PROMETHEUS_CONFIG'
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -577,10 +567,11 @@ scrape_configs:
     static_configs:
       - targets: ['host.docker.internal:9090']
 PROMETHEUS_CONFIG
-                fi
-                
-                if [ ! -f "$INSTALL_DIR/prometheus/alerts.yml" ]; then
-                    cat > "$INSTALL_DIR/prometheus/alerts.yml" << 'ALERTS_CONFIG'
+                    fi
+                    
+                    # Проверяем и создаем alerts.yml если его нет
+                    if [ ! -f "$INSTALL_DIR/docker/prometheus/alerts.yml" ] && [ -d "$INSTALL_DIR/docker/prometheus" ]; then
+                        cat > "$INSTALL_DIR/docker/prometheus/alerts.yml" << 'ALERTS_CONFIG'
 groups:
   - name: blockchain_alerts
     rules:
@@ -593,10 +584,30 @@ groups:
           summary: "Высокий уровень ошибок в Blockchain Module"
           description: "Уровень ошибок превысил 10% за последние 5 минут"
 ALERTS_CONFIG
+                    fi
+                    
+                    # Проверяем и создаем alertmanager.yml если его нет
+                    if [ ! -f "$INSTALL_DIR/docker/alertmanager/alertmanager.yml" ] && [ -d "$INSTALL_DIR/docker/alertmanager" ]; then
+                        mkdir -p "$INSTALL_DIR/docker/alertmanager"
+                        cat > "$INSTALL_DIR/docker/alertmanager/alertmanager.yml" << 'ALERTMANAGER_CONFIG'
+global:
+  smtp_smarthost: 'localhost:25'
+  smtp_from: 'alertmanager@example.com'
+
+route:
+  receiver: 'email'
+
+receivers:
+  - name: 'email'
+    email_configs:
+      - to: 'admin@example.com'
+ALERTMANAGER_CONFIG
+                    fi
                 fi
                 
                 print_info "Запуск Docker Compose..."
-                docker-compose up -d
+                # Запускаем только базовые сервисы, без alertmanager если есть проблемы
+                docker-compose up -d prometheus grafana node-exporter cadvisor 2>/dev/null || docker-compose up -d
                 
                 if [ $? -eq 0 ]; then
                     print_success "Docker мониторинг запущен"
@@ -605,8 +616,8 @@ ALERTS_CONFIG
                     print_info "   Node экспортер: http://localhost:9100"
                     print_info "   cAdvisor:       http://localhost:8081"
                 else
-                    print_error "Ошибка запуска Docker Compose"
-                    print_info "Попробуйте запустить вручную: cd $INSTALL_DIR && docker-compose up -d"
+                    print_warning "Не удалось запустить все сервисы мониторинга"
+                    print_info "Попробуйте запустить вручную: cd $INSTALL_DIR && docker-compose up -d prometheus grafana"
                 fi
             else
                 print_warning "Файл docker-compose.yml не найден"
@@ -681,7 +692,12 @@ volumes:
   grafana_data:
 DOCKER_COMPOSE
                 
-                print_info "Создан базовый docker-compose.yml. Запустите установку мониторинга повторно."
+                # Создаем директории для конфигурационных файлов
+                mkdir -p "$INSTALL_DIR/prometheus"
+                mkdir -p "$INSTALL_DIR/grafana/dashboards"
+                
+                print_info "Создан базовый docker-compose.yml"
+                print_info "Для запуска мониторинга выполните: cd $INSTALL_DIR && docker-compose up -d"
             fi
         fi
     fi
@@ -827,7 +843,7 @@ show_summary() {
 main_installation() {
     echo ""
     echo "="*60
-    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.2${NC}"
+    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.3${NC}"
     echo "="*60
     echo ""
     
@@ -841,15 +857,6 @@ main_installation() {
             print_error "Прервано пользователем"
             exit 1
         fi
-    fi
-    
-    # Проверяем текущую директорию
-    if ! pwd >/dev/null 2>&1; then
-        print_warning "Текущая директория недоступна, переходим в домашнюю директорию"
-        cd "$HOME" || {
-            print_error "Не удалось перейти в домашнюю директорию"
-            exit 1
-        }
     fi
     
     # Detect OS
@@ -946,5 +953,5 @@ main_installation() {
     show_summary
 }
 
-# Main script execution
+# Run installation
 main_installation
