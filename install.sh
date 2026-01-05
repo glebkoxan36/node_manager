@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Blockchain Module Auto-Installer
-# Version: 2.0.1
+# Version: 2.0.2
 # Author: Blockchain Module Team
 
 set -e
@@ -33,6 +33,31 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Safe directory change
+safe_cd() {
+    local target_dir="$1"
+    if [ -d "$target_dir" ]; then
+        cd "$target_dir" || {
+            print_error "Не удалось перейти в директорию: $target_dir"
+            return 1
+        }
+        return 0
+    else
+        print_error "Директория не существует: $target_dir"
+        return 1
+    fi
+}
+
+# Get safe directory
+get_safe_dir() {
+    # Try to get current directory, fallback to home if fails
+    if current_dir=$(pwd 2>/dev/null); then
+        echo "$current_dir"
+    else
+        echo "$HOME"
+    fi
 }
 
 # Detect OS
@@ -150,24 +175,20 @@ clean_install_dir() {
         case $choice in
             1)
                 print_info "Удаление старой установки..."
-                # Сохраняем текущую директорию
-                CURRENT_DIR=$(pwd)
-                # Если мы находимся в директории установки, выходим из нее
-                if [[ "$CURRENT_DIR" == "$INSTALL_DIR"* ]]; then
-                    cd "$HOME"
-                fi
+                # Сохраняем безопасную директорию перед удалением
+                SAFE_DIR=$(get_safe_dir)
+                print_info "Переход в безопасную директорию: $SAFE_DIR"
+                cd "$SAFE_DIR" || cd "$HOME"
                 rm -rf "$INSTALL_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
             2)
                 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
                 print_info "Создание резервной копии: $BACKUP_DIR"
-                # Сохраняем текущую директорию
-                CURRENT_DIR=$(pwd)
-                # Если мы находимся в директории установки, выходим из нее
-                if [[ "$CURRENT_DIR" == "$INSTALL_DIR"* ]]; then
-                    cd "$HOME"
-                fi
+                # Сохраняем безопасную директорию перед перемещением
+                SAFE_DIR=$(get_safe_dir)
+                print_info "Переход в безопасную директорию: $SAFE_DIR"
+                cd "$SAFE_DIR" || cd "$HOME"
                 mv "$INSTALL_DIR" "$BACKUP_DIR"
                 mkdir -p "$INSTALL_DIR"
                 ;;
@@ -238,7 +259,7 @@ async def run_services():
         # Запуск REST API
         print("🌐 Запуск REST API...")
         if start_rest_api_server():
-            print("✅ REST API сервер запущен")
+            print("✅ REST API сервер запущен"
         else:
             print("⚠️  REST API сервер не запущен")
         
@@ -285,7 +306,7 @@ def main():
             # Запускаем сервисы
             return asyncio.run(run_services())
     except KeyboardInterrupt:
-        print("\n\n👋 Завершение работы...")
+        print("\n\n👋 Завернение работы...")
         return 0
     except Exception as e:
         print(f"❌ Критическая ошибка: {e}")
@@ -806,7 +827,7 @@ show_summary() {
 main_installation() {
     echo ""
     echo "="*60
-    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.1${NC}"
+    echo -e "${GREEN}Blockchain Module Auto-Installer v2.0.2${NC}"
     echo "="*60
     echo ""
     
@@ -820,6 +841,15 @@ main_installation() {
             print_error "Прервано пользователем"
             exit 1
         fi
+    fi
+    
+    # Проверяем текущую директорию
+    if ! pwd >/dev/null 2>&1; then
+        print_warning "Текущая директория недоступна, переходим в домашнюю директорию"
+        cd "$HOME" || {
+            print_error "Не удалось перейти в домашнюю директорию"
+            exit 1
+        }
     fi
     
     # Detect OS
@@ -916,5 +946,5 @@ main_installation() {
     show_summary
 }
 
-# Run installation
+# Main script execution
 main_installation
